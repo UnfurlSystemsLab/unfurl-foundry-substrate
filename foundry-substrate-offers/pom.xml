@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.unfurl.foundry.substrate</groupId>
+        <artifactId>unfurl-foundry-substrate</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>foundry-substrate-offers</artifactId>
+
+    <!--
+      NOTE: per the LLD this module is the ONLY one that should depend on unfurl-dcp,
+      for the Claim / CompositionContract / Disposition schemas. That artifact does not
+      exist yet, so OfferFragment is a clearly-marked local placeholder for the DCP claim
+      offer fragment. When unfurl-dcp publishes, add it here and replace OfferFragment.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-ports</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.unfurl.substrate</groupId>
+            <artifactId>substrate-composition-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,20 @@
+package com.unfurl.foundry.substrate.events;
+
+public enum AgentEventType {
+    AGENT_STARTED,
+    AGENT_COMPLETED,
+    AGENT_FAILED,
+    AGENT_CANCELLED,
+    PHASE_STARTED,
+    PHASE_COMPLETED,
+    PHASE_FAILED,
+    PHASE_WAITING,
+    PHASE_SKIPPED,
+    MODEL_INVOKED,
+    TOKENS_CONSUMED,
+    TOOL_CALLED,
+    TOOL_COMPLETED,
+    TOOL_FAILED,
+    RAG_RETRIEVED,
+    GUARDRAIL_TRIPPED
+}

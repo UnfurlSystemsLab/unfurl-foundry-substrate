@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.unfurl.foundry.substrate</groupId>
+        <artifactId>unfurl-foundry-substrate</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>foundry-substrate-testing</artifactId>
+
+    <!--
+      Provides fakes/fixtures for downstream repos and for the engine's own tests.
+      Depends on every foundry-substrate module EXCEPT foundry-substrate-engine: the engine
+      consumes these fakes at test scope, so testing must not depend back on the engine
+      (that would form a reactor cycle).
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-ports</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-tools</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-rag</artifactId>
+        </dependency>
+    </dependencies>
+</project>
