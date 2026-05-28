@@ -30,6 +30,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <substrate.version>0.1.0-SNAPSHOT</substrate.version>
+        <dcp.version>0.1.0-SNAPSHOT</dcp.version>
         <jackson.version>2.17.2</jackson.version>
         <junit.version>5.10.3</junit.version>
         <assertj.version>3.26.3</assertj.version>
@@ -122,6 +123,11 @@
                 <groupId>com.unfurl.substrate</groupId>
                 <artifactId>substrate-composition-api</artifactId>
                 <version>${substrate.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.unfurl.dcp</groupId>
+                <artifactId>unfurl-dcp</artifactId>
+                <version>${dcp.version}</version>
             </dependency>
 
             <!-- external -->

@@ -26,7 +26,7 @@ class ArchitectureTest {
             Map.entry("rag", Set.of("domain", "ports", "substrate-ports")),
             Map.entry("resolver", Set.of("domain", "substrate-resolver")),
             Map.entry("serialization", Set.of("domain")),
-            Map.entry("offers", Set.of("domain", "ports", "substrate-ports", "substrate-composition-api")),
+            Map.entry("offers", Set.of("domain", "ports", "dcp", "substrate-ports", "substrate-composition-api")),
             Map.entry("testing", Set.of("domain", "ports", "tools", "rag", "substrate-ports")),
             Map.entry("engine", Set.of("domain", "events", "ports", "prompt", "tools", "rag", "resolver", "offers",
                     "substrate-domain", "substrate-ports"))
@@ -181,6 +181,9 @@ class ArchitectureTest {
         }
         if (packageName.startsWith("com.unfurl.substrate.composition")) {
             return "substrate-composition-api";
+        }
+        if (packageName.startsWith("com.unfurl.dcp")) {
+            return "dcp";
         }
         return null;
     }

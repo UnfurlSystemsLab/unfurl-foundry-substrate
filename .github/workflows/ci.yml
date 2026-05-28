@@ -15,6 +15,14 @@ on:
         description: Branch, tag, or SHA for unfurl-substrate
         required: false
         default: ''
+      dcp-repository:
+        description: GitHub repository for unfurl-dcp
+        required: false
+        default: ''
+      dcp-ref:
+        description: Branch, tag, or SHA for unfurl-dcp
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -50,6 +58,21 @@ jobs:
           ref: ${{ inputs.substrate-ref }}
           path: unfurl-substrate
 
+      - name: Checkout unfurl-dcp
+        if: ${{ inputs.dcp-ref == '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.dcp-repository || format('{0}/unfurl-dcp', github.repository_owner) }}
+          path: unfurl-dcp
+
+      - name: Checkout unfurl-dcp at requested ref
+        if: ${{ inputs.dcp-ref != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.dcp-repository || format('{0}/unfurl-dcp', github.repository_owner) }}
+          ref: ${{ inputs.dcp-ref }}
+          path: unfurl-dcp
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -59,6 +82,10 @@ jobs:
 
       - name: Install unfurl-substrate locally
         working-directory: unfurl-substrate
+        run: mvn --batch-mode --no-transfer-progress -DskipTests install
+
+      - name: Install unfurl-dcp locally
+        working-directory: unfurl-dcp
         run: mvn --batch-mode --no-transfer-progress -DskipTests install
 
       - name: Verify unfurl-foundry-substrate
@@ -83,6 +110,12 @@ jobs:
           repository: ${{ format('{0}/unfurl-substrate', github.repository_owner) }}
           path: unfurl-substrate
 
+      - name: Checkout unfurl-dcp
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ format('{0}/unfurl-dcp', github.repository_owner) }}
+          path: unfurl-dcp
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -95,6 +128,10 @@ jobs:
 
       - name: Install unfurl-substrate locally
         working-directory: unfurl-substrate
+        run: mvn --batch-mode --no-transfer-progress -DskipTests install
+
+      - name: Install unfurl-dcp locally
+        working-directory: unfurl-dcp
         run: mvn --batch-mode --no-transfer-progress -DskipTests install
 
       - name: Deploy unfurl-foundry-substrate to GitHub Packages

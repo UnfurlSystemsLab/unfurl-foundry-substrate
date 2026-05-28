@@ -10,12 +10,6 @@
     </parent>
     <artifactId>foundry-substrate-offers</artifactId>
 
-    <!--
-      NOTE: per the LLD this module is the ONLY one that should depend on unfurl-dcp,
-      for the Claim / CompositionContract / Disposition schemas. That artifact does not
-      exist yet, so OfferFragment is a clearly-marked local placeholder for the DCP claim
-      offer fragment. When unfurl-dcp publishes, add it here and replace OfferFragment.
-    -->
     <dependencies>
         <dependency>
             <groupId>com.unfurl.foundry.substrate</groupId>
@@ -28,6 +22,10 @@
         <dependency>
             <groupId>com.unfurl.substrate</groupId>
             <artifactId>substrate-composition-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.unfurl.dcp</groupId>
+            <artifactId>unfurl-dcp</artifactId>
         </dependency>
     </dependencies>
 </project>
