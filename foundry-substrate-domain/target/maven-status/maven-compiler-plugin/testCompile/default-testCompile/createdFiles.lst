@@ -1,2 +1,4 @@
+com\unfurl\foundry\substrate\runstate\CostAccountingPropertyTest.class
 com\unfurl\foundry\substrate\agent\AgentDefinitionValidatorTest.class
+com\unfurl\foundry\substrate\runstate\CostAccountingPropertyTest$Usage.class
 com\unfurl\foundry\substrate\agent\BudgetPolicyTest.class

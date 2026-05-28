@@ -32,6 +32,6 @@ public final class EchoModelProvider implements ModelProvider {
                 .reduce((first, second) -> second)
                 .orElse("");
         return new ModelResponse(Message.assistant("echo: " + lastUser), java.util.List.of(),
-                "stop", new ModelUsage(promptTokens, completionTokens), Map.of());
+                "stop", new ModelUsage(promptTokens, completionTokens), Map.of(), "echo", java.math.BigDecimal.ZERO);
     }
 }

@@ -8,7 +8,6 @@ public enum AgentEventType {
     PHASE_STARTED,
     PHASE_COMPLETED,
     PHASE_FAILED,
-    PHASE_WAITING,
     PHASE_SKIPPED,
     MODEL_INVOKED,
     TOKENS_CONSUMED,

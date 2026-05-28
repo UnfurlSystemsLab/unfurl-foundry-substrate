@@ -149,6 +149,31 @@ class EmbeddedAgentRuntimeTest {
         assertThat(run.phases().get("second").status()).isEqualTo(AgentPhaseStatus.FAILED);
     }
 
+    @Test
+    void recordsTypedProviderNameAndEstimatedCost() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(
+                        new ModelResponse(Message.assistant("spent"), List.of(), "stop", new ModelUsage(2, 3),
+                                Map.of(), "test-provider", new BigDecimal("0.42"))
+                )));
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry());
+        AgentDefinition agent = new AgentDefinition(
+                "agent",
+                "1",
+                Map.of(),
+                List.of(phase("first", Map.of("prompt", "first"), List.of(), 0)),
+                List.of(),
+                Map.of(),
+                "model",
+                List.of()
+        );
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.cost().tokensByProvider()).containsEntry("test-provider", 5L);
+        assertThat(run.cost().estimatedCostUsd()).isEqualByComparingTo("0.42");
+    }
+
     private AgentPhase phase(String id, Map<String, Object> input, List<String> allowedTools, int maxToolIterations) {
         return new AgentPhase(id, null, null, allowedTools, null, input, Map.of(), List.of(), maxToolIterations);
     }

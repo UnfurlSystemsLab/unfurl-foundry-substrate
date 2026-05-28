@@ -67,6 +67,43 @@ class AgentDefinitionValidatorTest {
         assertThat(agent.budgetPolicy()).isEqualTo(policy);
     }
 
+    @Test
+    void rejectsPhaseToolsOutsideAgentToolRefs() {
+        AgentDefinition agent = new AgentDefinition(
+                "agent",
+                "1",
+                Map.of(),
+                List.of(new AgentPhase("a", null, null, List.of("missing"), null, Map.of(), Map.of(), List.of(), 0)),
+                List.of(),
+                Map.of(),
+                "model",
+                List.of("known")
+        );
+
+        assertThatThrownBy(() -> validator.validate(agent))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("allows unknown tool 'missing'");
+    }
+
+    @Test
+    void rejectsModelAndPromptRefsWhenDefinitionDeclaresCatalogs() {
+        AgentDefinition agent = new AgentDefinition(
+                "agent",
+                "1",
+                Map.of("modelRefs", List.of("model"), "promptTemplateRefs", List.of("prompt")),
+                List.of(new AgentPhase("a", "missing-prompt", "missing-model", List.of(), null, Map.of(), Map.of(), List.of(), 0)),
+                List.of(),
+                Map.of(),
+                "model",
+                List.of()
+        );
+
+        assertThatThrownBy(() -> validator.validate(agent))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unknown model 'missing-model'")
+                .hasMessageContaining("unknown prompt template 'missing-prompt'");
+    }
+
     private AgentPhase phase(String id) {
         return new AgentPhase(id, null, null, List.of(), null, Map.of("prompt", id), Map.of(), List.of(), 0);
     }

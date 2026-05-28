@@ -39,11 +39,50 @@ public final class AgentDefinitionValidator {
 
         validateDependencies(agent, phasesById.keySet(), errors);
         validateEdges(agent, phasesById.keySet(), errors);
+        validateReferences(agent, errors);
         validateNoCycles(agent, phasesById.keySet(), errors);
 
         if (!errors.isEmpty()) {
             throw new IllegalArgumentException("Invalid agent definition: " + String.join("; ", errors));
         }
+    }
+
+    private void validateReferences(AgentDefinition agent, List<String> errors) {
+        Set<String> declaredTools = Set.copyOf(agent.toolRefs());
+        Set<String> declaredModels = declaredSet(agent.metadata().get("modelRefs"));
+        Set<String> declaredPrompts = declaredSet(agent.metadata().get("promptTemplateRefs"));
+
+        if (agent.defaultModelRef() != null && !declaredModels.isEmpty() && !declaredModels.contains(agent.defaultModelRef())) {
+            errors.add("defaultModelRef references unknown model '" + agent.defaultModelRef() + "'");
+        }
+
+        for (AgentPhase phase : agent.phases()) {
+            if (phase.modelRef() != null && !declaredModels.isEmpty() && !declaredModels.contains(phase.modelRef())) {
+                errors.add("Phase '" + phase.id() + "' references unknown model '" + phase.modelRef() + "'");
+            }
+            if (phase.promptTemplateRef() != null && !declaredPrompts.isEmpty()
+                    && !declaredPrompts.contains(phase.promptTemplateRef())) {
+                errors.add("Phase '" + phase.id() + "' references unknown prompt template '" + phase.promptTemplateRef() + "'");
+            }
+            for (String toolRef : phase.allowedToolRefs()) {
+                if (!declaredTools.isEmpty() && !declaredTools.contains(toolRef)) {
+                    errors.add("Phase '" + phase.id() + "' allows unknown tool '" + toolRef + "'");
+                }
+            }
+        }
+    }
+
+    private Set<String> declaredSet(Object value) {
+        if (value instanceof Iterable<?> iterable) {
+            Set<String> values = new HashSet<>();
+            for (Object item : iterable) {
+                if (item != null) {
+                    values.add(String.valueOf(item));
+                }
+            }
+            return values;
+        }
+        return Set.of();
     }
 
     private void validateDependencies(AgentDefinition agent, Set<String> phaseIds, List<String> errors) {

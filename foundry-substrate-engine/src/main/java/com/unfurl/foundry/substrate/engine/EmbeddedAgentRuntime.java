@@ -133,8 +133,8 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     public AgentRunState resume(String runId, Map<String, Object> signal, ExecutionContext context) {
         AgentRunState loaded = store.load(runId, context)
                 .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
-        // The in-memory runner produces no WAITING state in this slice, so resume reloads and
-        // returns. Durable suspend/resume is unfurl-foundry's; this is the in-memory floor.
+        // The in-memory runner has no suspend point in this slice, so resume reloads and
+        // returns. Durable suspend/resume is unfurl-foundry's responsibility.
         return loaded;
     }
 
@@ -288,11 +288,17 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     }
 
     private String providerName(ModelResponse response) {
+        if (response.providerName() != null && !response.providerName().isBlank()) {
+            return response.providerName();
+        }
         Object value = response.metadata().get("providerName");
         return value == null ? null : String.valueOf(value);
     }
 
     private java.math.BigDecimal estimatedCostUsd(ModelResponse response) {
+        if (response.estimatedCostUsd().signum() > 0) {
+            return response.estimatedCostUsd();
+        }
         Object value = response.metadata().getOrDefault("estimatedCostUsd", response.metadata().get("costUsd"));
         if (value instanceof java.math.BigDecimal decimal) {
             return decimal;

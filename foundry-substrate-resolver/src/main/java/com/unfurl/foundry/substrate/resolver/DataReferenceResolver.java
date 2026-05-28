@@ -1,6 +1,7 @@
 package com.unfurl.foundry.substrate.resolver;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,7 +43,8 @@ public final class DataReferenceResolver {
 
     /**
      * Resolve every reference-valued entry in a phase input map, leaving literals intact.
-     * Unresolved references become {@code null}.
+     * Unresolved references are omitted so downstream immutable maps never receive null
+     * values from a missing reference.
      */
     public Map<String, Object> resolveInput(
             Map<String, Object> input,
@@ -52,12 +54,43 @@ public final class DataReferenceResolver {
         Map<String, Object> resolved = new LinkedHashMap<>();
         input.forEach((key, value) -> {
             if (isReference(value)) {
-                resolved.put(key, resolve((String) value, agentInput, phaseOutputs).orElse(null));
+                resolve((String) value, agentInput, phaseOutputs).ifPresent(resolvedValue -> resolved.put(key, resolvedValue));
             } else {
-                resolved.put(key, value);
+                resolved.put(key, resolveNested(value, agentInput, phaseOutputs));
             }
         });
         return resolved;
+    }
+
+    private Object resolveNested(
+            Object value,
+            Map<String, Object> agentInput,
+            Map<String, Map<String, Object>> phaseOutputs
+    ) {
+        if (isReference(value)) {
+            return resolve((String) value, agentInput, phaseOutputs).orElse(null);
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> resolved = new LinkedHashMap<>();
+            map.forEach((key, nestedValue) -> {
+                Object next = resolveNested(nestedValue, agentInput, phaseOutputs);
+                if (next != null) {
+                    resolved.put(String.valueOf(key), next);
+                }
+            });
+            return Map.copyOf(resolved);
+        }
+        if (value instanceof List<?> list) {
+            List<Object> resolved = new ArrayList<>();
+            for (Object item : list) {
+                Object next = resolveNested(item, agentInput, phaseOutputs);
+                if (next != null) {
+                    resolved.add(next);
+                }
+            }
+            return List.copyOf(resolved);
+        }
+        return value;
     }
 
     private Optional<Object> walk(Map<String, Object> root, List<String> path) {

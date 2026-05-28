@@ -72,6 +72,7 @@ artifacts:
   foundry-substrate-tools
   foundry-substrate-rag
   foundry-substrate-resolver
+  foundry-substrate-serialization
   foundry-substrate-offers
   foundry-substrate-engine
   foundry-substrate-testing
@@ -114,10 +115,12 @@ foundry-substrate-events
 foundry-substrate-ports
   packages:
     com.unfurl.foundry.substrate.ports
+    com.unfurl.foundry.substrate.ports.adapters
     com.unfurl.foundry.substrate.guardrail
   contains:
     ModelProvider, EmbeddingProvider, VectorStore, ToolExecutor, ToolRegistry,
     RagRetriever, AgentRuntime, ProviderRegistry, CostGuardrail, PermissionBridge,
+    NodeExecutor adapters for agent.run/tool.call/rag.search/provider.call,
     no-op/default port types
   may depend on:
     foundry-substrate-domain, substrate-ports, substrate-events
@@ -154,6 +157,14 @@ foundry-substrate-resolver
   may depend on:
     foundry-substrate-domain, substrate-resolver
 
+foundry-substrate-serialization
+  package:
+    com.unfurl.foundry.substrate.serialization
+  contains:
+    FoundrySubstrateCodec for stable JSON/YAML round trips of public models
+  may depend on:
+    foundry-substrate-domain, Jackson databind, Jackson YAML
+
 foundry-substrate-offers
   package:
     com.unfurl.foundry.substrate.offers
@@ -180,7 +191,9 @@ foundry-substrate-testing
     EchoModelProvider, StaticEmbeddingProvider, InMemoryVectorStore,
     RecordingToolExecutor, NoopGuardrail, event collectors, fixtures
   may depend on:
-    all foundry-substrate modules
+    foundry-substrate-domain, foundry-substrate-ports, foundry-substrate-tools,
+    foundry-substrate-rag; it intentionally excludes foundry-substrate-engine to
+    avoid a reactor cycle because engine consumes testing at test scope
 ```
 
 Implementation rules:
@@ -235,7 +248,8 @@ Core domain types live under `com.unfurl.foundry.substrate.*`. Agent topology re
 `ModelRequest` and `ModelResponse`
 
 - `ModelRequest` fields: `messages`, `modelRef`, `parameters` (temperature, maxTokens, …), `toolSchemas`, `metadata`.
-- `ModelResponse` fields: `message`, `toolCalls`, `finishReason`, `usage` (prompt/completion tokens), `metadata`.
+- `ModelResponse` fields: `message`, `toolCalls`, `finishReason`, `usage` (prompt/completion tokens), `metadata`, `providerName`, `estimatedCostUsd`.
+- `providerName` and `estimatedCostUsd` are typed fields. The legacy metadata keys `providerName`, `estimatedCostUsd`, and `costUsd` are accepted as a compatibility fallback, but providers should set the typed fields.
 - These are neutral shapes. No provider-specific fields; adapters map to/from concrete SDK types outside the substrate.
 
 `RagQuery`, `RagResult`, `Chunk`
@@ -258,10 +272,10 @@ Core domain types live under `com.unfurl.foundry.substrate.*`. Agent topology re
 
 Statuses:
 
-- `AgentRunStatus`: `PENDING`, `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `CANCELLED`.
-- `AgentPhaseStatus`: `PENDING`, `READY`, `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `SKIPPED`, `CANCELLED`.
+- `AgentRunStatus`: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`.
+- `AgentPhaseStatus`: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `SKIPPED`, `CANCELLED`.
 
-These mirror `WorkflowStatus`/`NodeStatus` deliberately, so flow's durable engine can drive agent phases as ordinary DAG nodes.
+The in-memory runner does not produce a waiting state in v1. Approval-driven waits and durable suspend/resume belong to `unfurl-foundry`; if that floor moves down into the substrate later, the statuses and resume contract must be extended together.
 
 ### Ports
 
@@ -319,6 +333,8 @@ Result types are immutable records or sealed interfaces. Do not throw for expect
 
 `CostGuardrail` evaluates the current `CostAccounting` against the resolved `AgentDefinition.budgetPolicy` and any outer execution envelope supplied by the caller. For flow-hosted `agentRef` invocations, flow passes the remaining workflow-run budget in `ExecutionContext.metadata()["outerBudgetRemainingUsd"]`; foundry/foundry-substrate guardrails apply the stricter of the agent cap and that outer value. The substrate shape remains a decision port only: it does not persist quota state or aggregate spend.
 
+`BudgetPolicyCostGuardrail` is the concrete no-I/O default shipped in `foundry-substrate-ports`. It reads two metadata keys through `CostGuardrailContext`: `agentBudgetPolicy` (attached by `EmbeddedAgentRuntime` from `AgentDefinition.budgetPolicy`) and `outerBudgetRemainingUsd` (optionally supplied by a host such as flow). It enforces only the current in-memory accounting snapshot; persistent quota state and rate tables stay above the substrate.
+
 ### Offers And Composition
 
 Offer fragments and AI invocables live in `com.unfurl.foundry.substrate.offers` and constitute the only place `unfurl-dcp` is imported.
@@ -338,12 +354,21 @@ public final class AgentInvocation implements ContractInvocable {
 
 `ToolInvocation` and `RagInvocation` follow the same shape. These are what the `unfurl-dcp` broker registers into a host `CapabilityRegistry` on accept; they translate a frozen-contract invocation into a call on the corresponding port (`AgentRuntime`, `ToolExecutor`, `RagRetriever`) and map the structured result back. The substrate provides the invocables and the shapes; it never decides whether the contract should exist.
 
+For hosts that register AI capability directly into the substrate `CapabilityRegistry`, `foundry-substrate-ports` also ships four `NodeExecutor` adapters:
+
+- `AgentRuntimeNodeExecutor` for `agent.run`
+- `ToolExecutorNodeExecutor` for `tool.call`
+- `RagRetrieverNodeExecutor` for `rag.search`
+- `ModelProviderNodeExecutor` for `provider.call`
+
+These are the flow-facing bridge: flow can resolve a normal substrate node executor while the implementation delegates to `AgentRuntime`, `ToolExecutor`, `RagRetriever`, or `ModelProvider` behind the port boundary.
+
 ### Events
 
 AI events live in `com.unfurl.foundry.substrate.events`, reusing the substrate `Event` envelope (and its `correlationId`/`integrityHash` metadata fields) with AI event types:
 
 - `AGENT_STARTED`, `AGENT_COMPLETED`, `AGENT_FAILED`, `AGENT_CANCELLED`
-- `PHASE_STARTED`, `PHASE_COMPLETED`, `PHASE_FAILED`, `PHASE_WAITING`
+- `PHASE_STARTED`, `PHASE_COMPLETED`, `PHASE_FAILED`, `PHASE_SKIPPED`
 - `MODEL_INVOKED`, `TOKENS_CONSUMED`
 - `TOOL_CALLED`, `TOOL_COMPLETED`, `TOOL_FAILED`
 - `RAG_RETRIEVED`
@@ -380,19 +405,17 @@ Start flow:
    - Assemble the prompt via `foundry-substrate-prompt` (rendering resolves references into `List<Message>`).
    - If the phase declares a RAG query, call `RagRetriever`, emit `RAG_RETRIEVED`, and fold results into the prompt.
    - Check `CostGuardrail`; the runner attaches the resolved `AgentDefinition.budgetPolicy` to `ExecutionContext` before the check. On a tripped budget, emit `GUARDRAIL_TRIPPED` and fail the phase.
-   - Call `ModelProvider.complete`, emit `MODEL_INVOKED` and `TOKENS_CONSUMED`, update `CostAccounting` with prompt/completion tokens, provider/model attribution, and optional `estimatedCostUsd` / `costUsd` response metadata.
+   - Call `ModelProvider.complete`, emit `MODEL_INVOKED` and `TOKENS_CONSUMED`, update `CostAccounting` with prompt/completion tokens, provider/model attribution, and `ModelResponse.estimatedCostUsd` (with legacy metadata fallback).
    - While the response contains tool calls and `maxToolIterations` is not exceeded: check `PermissionBridge`, resolve the tool via `ToolRegistry`, execute, emit `TOOL_CALLED`/`TOOL_COMPLETED`, append the tool result message, and call the model again.
    - On success, store the phase output, mark `COMPLETED`, persist, emit `PHASE_COMPLETED`.
-   - On a waiting result (e.g. a tool requires human approval), store the wait, mark phase and run `WAITING`, emit `PHASE_WAITING`, and stop.
-   - Evaluate outgoing conditional edges; mark non-matching branch phases `SKIPPED`; mark unblocked phases `READY`.
+   - Evaluate conditional edges; mark non-matching branch phases `SKIPPED`; continue scanning pending phases in deterministic order.
    - On failure, mark phase and run `FAILED`, persist, emit failure events, and stop.
 6. If all reachable phases are `COMPLETED` or `SKIPPED`, mark the run `COMPLETED`, persist, emit `AGENT_COMPLETED`.
 
 Resume flow:
 
-- Load the run and find a `WAITING` phase whose wait correlation matches the signal.
-- Apply the signal as the resolved tool/phase result, mark the phase `READY`/`COMPLETED`, and continue the sequential loop.
-- Durable, distributed, and streaming resume behavior belongs to `unfurl-foundry`; the substrate provides only the in-memory wait/resume floor. (The substrate review's Gap C is pre-empted here: `resume()` actually re-runs the loop.)
+- In v1 the in-memory runner has no suspend point and never produces `WAITING`; `resume(runId, signal, context)` reloads the current run state and returns it.
+- Durable, distributed, approval-driven, and streaming resume behavior belongs to `unfurl-foundry`. The LLD-level resume flow is therefore aspirational until a real wait-producing substrate path is introduced.
 
 Cancellation:
 
@@ -449,7 +472,7 @@ Use layered validation:
 Error model:
 
 - Expected failures return structured error records.
-- Top-level error categories: `VALIDATION`, `POLICY_DENIED`, `RESOLUTION`, `CONDITION`, `MODEL_FAILED`, `TOOL_FAILED`, `RETRIEVAL_FAILED`, `PROVIDER_MISSING`, `TOOL_MISSING`, `GUARDRAIL_TRIPPED`, `PERMISSION_DENIED`, `WAIT_NOT_FOUND`, `COMPOSITION`, `RUN_NOT_FOUND`, `CANCELLED`.
+- Top-level error categories/codes: `VALIDATION`, `POLICY_DENIED`, `RESOLUTION`, `CONDITION`, `MODEL_FAILED`, `TOOL_FAILED`, `RETRIEVAL_FAILED`, `PROVIDER_MISSING`, `TOOL_MISSING`, `TOOL_NOT_ALLOWED`, `MAX_TOOL_ITERATIONS_EXCEEDED`, `SCHEDULE_STALLED`, `AGENT_NOT_COMPLETED`, `GUARDRAIL_TRIPPED`, `PERMISSION_DENIED`, `COMPOSITION`, `RUN_NOT_FOUND`, `CANCELLED`.
 - Errors include location fields where applicable: agent id, phase id, edge id, tool name, model ref, reference expression, condition expression, run id, wait id, iteration index.
 - Runtime exceptions are reserved for programmer errors and are wrapped at runner boundaries into structured run failures.
 
@@ -523,7 +546,7 @@ Architecture tests with ArchUnit:
 - No production package depends on `foundry-substrate-testing`.
 - Module dependency graph matches the allowed edges in this LLD.
 - `foundry-substrate-domain`, `-ports`, `-prompt`, `-tools`, `-rag`, `-resolver`, `-offers` do not depend on `foundry-substrate-engine`.
-- Only `foundry-substrate-testing` depends on test fixtures.
+- `foundry-substrate-testing` depends on every module needed for fixtures except `foundry-substrate-engine`, which depends on testing at test scope; this avoids a reactor cycle.
 
 Enterprise tests:
 
@@ -544,7 +567,7 @@ Enterprise tests:
 6. Implement RAG query/result/provenance shapes and the retriever port surface.
 7. Implement `agentRef`/`toolRef` resolution with unit/property tests.
 8. Implement offer fragments and `ContractInvocable` impls (`AgentInvocation`, `ToolInvocation`, `RagInvocation`) against `unfurl-dcp` claim/contract types.
-9. Implement the in-memory `AgentRunStore` and `EmbeddedAgentRuntime`, with the resolver wired into phase-input and condition paths and a real `resume()`.
+9. Implement the in-memory `AgentRunStore` and `EmbeddedAgentRuntime`, with the resolver wired into phase-input and condition paths. `resume()` remains a reload-only v1 stub until a wait-producing substrate path exists.
 10. Implement AI event schema and metadata-safe event builders.
 11. Implement downstream testing fixtures (echo provider, static embedder, in-memory vector store, recording tool executor).
 12. Complete coverage, architecture, and enterprise guardrail tests before flow and foundry consume the library.

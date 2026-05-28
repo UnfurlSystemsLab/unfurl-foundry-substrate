@@ -46,13 +46,15 @@ If an implementation starts adding a model SDK, an HTTP client, a vector-DB driv
 
 - portable agent definition shape (a multi-phase agent as a DAG of phases with conditional edges)
 - tool, prompt/message, model-request/response, RAG query/result, and embedding shapes
+- `FoundrySubstrateCodec` for stable JSON/YAML round trips of public model records
 - AI execution-state shape (agent run, phase state, tool-call records, cost accounting metadata)
 - AI ports: model provider, embedding provider, vector store, tool executor/registry, RAG retriever, agent runtime, provider registry, cost-guardrail, permission bridge
 - AI capability **offers** expressed as DCP claim fragments (`agent.run`, `tool.call`, `rag.search`, `provider.call`)
 - AI `ContractInvocable` implementations that expose those offers over a frozen contract
+- AI `NodeExecutor` adapters for `agent.run`, `tool.call`, `rag.search`, and `provider.call`, so flow can register AI capability in its normal substrate `CapabilityRegistry`
 - `agentRef` / `toolRef` reference resolution
 - AI event schema
-- cost-accounting and metering shapes — per-run token/cost capture and metering-grade event metadata — and the `CostGuardrail` decision port, without aggregation, persistence, or enforcement
+- cost-accounting and metering shapes — per-run token/cost capture and metering-grade event metadata — `BudgetPolicy`, and the `CostGuardrail` decision port with a no-I/O `BudgetPolicyCostGuardrail` default, without aggregation, persistence, quota state, or billing
 - a minimal embedded agent runner with in-memory state and no-op providers
 
 `unfurl-foundry-substrate` does not own:
@@ -118,6 +120,8 @@ On **accept**, the broker registers the guest's `offers` into the host's `Capabi
 
 `unfurl-foundry-substrate`'s role in this final step is concrete and bounded: it supplies the **AI `ContractInvocable` implementations** (`agent.run`, `tool.call`, `rag.search`, `provider.call`) that the broker registers, and the agent/tool/model/rag **shapes** those invocations carry. It does not own the registration mechanism (that is the broker's) nor the decision (that is fabric's, frozen).
 
+For direct host registration, the ports module also supplies the matching substrate `NodeExecutor` adapters: `AgentRuntimeNodeExecutor`, `ToolExecutorNodeExecutor`, `RagRetrieverNodeExecutor`, and `ModelProviderNodeExecutor`. These let flow treat AI capabilities as ordinary `uses` targets while foundry-substrate keeps the model/tool/rag/agent semantics behind ports.
+
 ```text
 [component]            present claim (offers: agent.run, rag.search, ...)
      |                          v
@@ -151,16 +155,18 @@ Cost is split the same way audit and telemetry are: **the substrate captures, th
 `unfurl-foundry-substrate` owns the **capture** half:
 
 - A per-run `CostAccounting` shape that accumulates prompt/completion tokens and per-provider/model tallies as phases, model calls, and tool calls execute.
+- Typed model attribution on `ModelResponse`: `providerName` and `estimatedCostUsd`, with metadata-key fallback for older providers.
 - Metering events — `MODEL_INVOKED`, `TOKENS_CONSUMED`, `TOOL_CALLED` — emitted metadata-first through the existing `EventSink`, and cost metrics through the existing `MetricsProvider` port. No new sink type is introduced.
 - Sufficient **attribution metadata** on accounting and events for any rollup above: `tenantId`, `runId`, `agentId`, `phaseId`, `modelRef`, `providerName`, `contractId`, `correlationId`.
 - The `CostGuardrail` port — a yes/no decision the runner consults before a model call — emitting `GUARDRAIL_TRIPPED`. It is a decision, not enforcement state.
+- `BudgetPolicy` on `AgentDefinition` and a no-I/O `BudgetPolicyCostGuardrail` default. `CostGuardrailContext` uses `ExecutionContext.metadata` keys `agentBudgetPolicy` and `outerBudgetRemainingUsd` so a host can pass the stricter outer run envelope without giving the substrate quota state.
 
 `unfurl-foundry` owns the **reporting** half: aggregation and rollup, usage persistence, per-tenant dashboards, quota/budget state, and usage/billing export. Two boundary rules:
 
 - **Reporting stays in-perimeter.** Cost rollups run in the customer's deployment like everything else; any vendor-side billing is a separate, consented export, never a runtime phone-home (offline-licensing rule).
 - **Cost is contract-attributable.** DCP offers carry `cost_implications` (required when metered) and the frozen contract pins them, so reporting can attribute spend to the contract/offer, not just the model call. The substrate's offer fragments surface that field.
 
-The same capture-not-enforce principle covers the related cross-cutting concerns: **quotas, budgets, and rate-limiting** are enforcement state owned by foundry, exposed to the substrate only as ports (`CostGuardrail`, `PermissionBridge`). The substrate signals and decides per call; it never persists or aggregates.
+The same capture-not-persist principle covers the related cross-cutting concerns: **quotas, budgets, and rate-limiting** are stateful enforcement concerns owned by foundry, exposed to the substrate only as ports (`CostGuardrail`, `PermissionBridge`) and the pure `BudgetPolicyCostGuardrail` default. The substrate signals and makes per-call decisions; it never persists quota state, stores rate tables, or aggregates.
 
 ---
 

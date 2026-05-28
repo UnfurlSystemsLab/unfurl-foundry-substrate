@@ -14,6 +14,10 @@ The deterministic side already did this split: shapes and ports live in `unfurl-
 
 No product loses or gains a responsibility it did not already have. `unfurl-foundry` still owns "probabilistic orchestration: agents, models, RAG, embeddings, vector, multi-agent composition"; it now sits *on top of* a named substrate instead of containing the contract types inline.
 
+Implementation note: the Java reactor now includes `foundry-substrate-serialization` (`FoundrySubstrateCodec`) alongside the domain/ports/engine modules, because stable JSON/YAML round trips are part of the contract surface. The ports module also includes `NodeExecutor` adapters for `agent.run`, `tool.call`, `rag.search`, and `provider.call`; these are the direct flow-facing bridge for static capability registration, while `foundry-substrate-offers` remains the DCP/contract bridge.
+
+Testing module exception: `foundry-substrate-testing` intentionally depends on the fixture-facing modules it needs, but not `foundry-substrate-engine`. The engine consumes those fixtures at test scope, so a testing-to-engine dependency would create a reactor cycle. This is a structural exception to any shorthand phrasing that says testing depends on "all modules."
+
 ---
 
 ## Mapping To HLD-A / HLD-B Subsystems
@@ -63,6 +67,6 @@ This is the only place the new docs go beyond a literal reading of the existing 
 - **`unfurl-flow`** keeps "no AI dependency": a workflow with no agent node runs with zero model involvement. Flow gains AI capability only by registering foundry-substrate executors, and AI reasoning runs behind ports / over frozen contracts.
 - **`unfurl-fabric`** keeps design-time negotiation; nothing intelligent moves into the runtime.
 - **`unfurl-foundry`** keeps probabilistic orchestration and now names its substrate.
-- **`unfurl-substrate`** is untouched; foundry-substrate depends on it and reuses `ExecutionContext`, `Event`, `CapabilityRegistry`, `ContractInvocable`, `EdgeDefinition`, `ConditionDefinition`, and the resolver.
+- **`unfurl-substrate`** remains the deterministic peer layer; foundry-substrate depends on it and reuses `ExecutionContext`, `Event`, `CapabilityRegistry`, `ContractInvocable`, `EdgeDefinition`, `ConditionDefinition`, and the resolver. The local Java implementation now wires `substrate-resolver` into the embedded substrate engine, closing the narrow "resolver declared but not used" gap from the substrate review; broader deterministic gaps such as loops/triggers/interaction execution and durable resume remain substrate-owned work.
 - **Multi-phase agents** stay as DAGs of phases joined by conditional edges (master doc decision: "multi-phase agents as default"); no new workflow model is introduced.
 - **ADR-001 language scope:** the foundry-substrate docs target Java (JDK 21), consistent with `unfurl-substrate` and `unfurl-dcp`. DCP-contract interop, not a language mandate, remains the cross-product boundary.
