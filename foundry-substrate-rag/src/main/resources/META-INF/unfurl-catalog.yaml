@@ -18,7 +18,15 @@ claim:
   refusals: []
   dependencies:
     needs:
+      # Both deps are host-owned. The corpus is the customer's vector
+      # store backend (Chroma / PGVector / Pinecone / etc.) wired
+      # through Spring AI's VectorStore abstraction. The embedding
+      # client is the customer-configured Spring AI EmbeddingClient bean
+      # — provider selection (OpenAI / Azure / Ollama) is a deployment
+      # decision, not a fabric-composition decision, so both stay on
+      # the host side of the perimeter.
       - "rag.corpus@v1?owner=host"
+      - "spring-ai.embedding-client@v1?owner=host"
   offers:
     - capability: rag.search
       description: Retrieve passages relevant to a query from a configured corpus.

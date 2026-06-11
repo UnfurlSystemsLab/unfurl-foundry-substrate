@@ -1,0 +1,48 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:engine
+    name: foundry-substrate-engine
+    kind: INTELLIGENT_COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Model-agnostic agent orchestration runtime; the entry point for plug-and-play Foundry agents.
+    concerns:
+      - concern: agent.execute
+        description: Execute an agent's reasoning loop against a host-supplied Spring AI chat client, optionally enriched with substrate plugins (RAG / tools / prompt templates) that the agent declares as needs.
+    boundaryPrinciples:
+      - "Plug-and-play composition: the engine itself only needs a chat client; RAG and tools substrates are pulled in only when the agent's own needs request them."
+      - "Model-agnostic by construction: the engine consumes a Spring AI ChatClient bean wired by the host's Spring context, so the LLM provider is a deployment decision rather than a fabric-composition decision."
+      - "Customer-controlled secrets: API keys and host configuration travel via host-supplied Spring beans, never via Fabric design-time state."
+  refusals:
+    - responsibility: ai.provider.implementation
+      reason: The engine delegates provider-specific HTTP / SDK calls to Spring AI's provider starters; it does not implement Anthropic / OpenAI / Azure / Ollama wire formats itself.
+      redirectTo: urn:spring:ai
+      required: false
+  dependencies:
+    needs:
+      # Host-supplied Spring AI ChatClient bean. owner=host marks this as
+      # outside the fabric composition surface (mirrors the rag.corpus
+      # and tool.implementation patterns in the sibling substrates).
+      - "spring-ai.chat-client@v1?owner=host"
+  offers:
+    - capability: agent.execute
+      description: Run an agent's reasoning loop; substrate plugins are discovered via the assembly composition, not via runtime configuration.
+      consumerAccess: ANY
+      stability: EVOLVING
+      version: 0.1.0
+      metered: false
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-engine:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    defaultMode: IN_PROCESS
+    supportedModes: [IN_PROCESS]
+  componentShapeProfile:
+    defaultShape: IN_PROCESS_LIBRARY
+    supportedShapes: [IN_PROCESS_LIBRARY]
+    shapeRuntime: {}
