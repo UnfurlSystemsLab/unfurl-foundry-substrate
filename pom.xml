@@ -31,6 +31,13 @@
         <module>sample-chatbot-agent</module>
         <module>sample-research-agent</module>
         <module>sample-tool-using-agent</module>
+        <!-- Spring AI adapter: implements foundry's ModelProvider /
+             EmbeddingProvider / VectorStore ports by wrapping
+             host-supplied Spring AI beans (ChatModel / EmbeddingModel /
+             VectorStore). Lets foundry consume any Spring AI provider
+             via its own port abstractions without dropping the
+             provider-agnostic interface. -->
+        <module>foundry-substrate-springai-adapter</module>
     </modules>
 
     <properties>
@@ -44,6 +51,7 @@
         <archunit.version>1.3.0</archunit.version>
         <jqwik.version>1.9.0</jqwik.version>
         <jakarta.validation.version>3.1.0</jakarta.validation.version>
+        <spring.ai.version>1.0.0</spring.ai.version>
     </properties>
 
     <dependencyManagement>
@@ -103,6 +111,24 @@
                 <groupId>com.unfurl.foundry.substrate</groupId>
                 <artifactId>foundry-substrate-testing</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.unfurl.foundry.substrate</groupId>
+                <artifactId>foundry-substrate-springai-adapter</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- Spring AI BOM. Pins all spring-ai-* artifact versions so
+                 sub-modules only ever ask for the group + artifact, never
+                 the version. The adapter module is the only consumer
+                 today; BOM lives here so future foundry-substrate sub-modules
+                 that want Spring AI types stay consistent. -->
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring.ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
 
             <!-- upstream substrate (the deterministic peer layer) -->

@@ -1,0 +1,66 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:springai-adapter
+    name: foundry-substrate-springai-adapter
+    kind: COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Spring AI adapter for the Foundry substrate — implements ModelProvider, EmbeddingProvider, and VectorStore by wrapping host-supplied Spring AI beans.
+    concerns:
+      - concern: springai.model-provider
+        description: Routes foundry ModelProvider calls through a Spring AI ChatModel bean.
+      - concern: springai.embedding-provider
+        description: Routes foundry EmbeddingProvider calls through a Spring AI EmbeddingModel bean.
+      - concern: springai.vector-store
+        description: Routes foundry VectorStore upsert/query through a Spring AI VectorStore bean.
+    boundaryPrinciples:
+      - "Provider-agnostic by construction: the customer picks the Spring AI provider (OpenAI, Anthropic, Azure, Ollama, Bedrock, ...) by wiring their preferred starter; this adapter speaks foundry's neutral port interfaces."
+      - "No design-time secrets: API keys, deployment ids, and vector-store credentials travel via the host's Spring context, never via Fabric design-time state."
+      - "Plug-in, not replacement: foundry substrates that take foundry's ModelProvider / EmbeddingProvider / VectorStore ports work unchanged when this adapter is the implementation."
+  refusals:
+    - responsibility: ai.provider.implementation
+      reason: This adapter wraps Spring AI, which is itself the source of provider-specific wire formats. The adapter never speaks Anthropic / OpenAI / Azure / Ollama formats directly.
+      redirectTo: urn:spring:ai
+      required: false
+  dependencies:
+    needs:
+      # Host-supplied Spring AI beans. Each is owner=host because the
+      # customer's Spring context governs which provider/backend is
+      # actually wired; fabric composition does not select among them.
+      - "spring-ai.chat-client@v1?owner=host"
+      - "spring-ai.embedding-client@v1?owner=host"
+      - "spring-ai.vector-store@v1?owner=host"
+  offers:
+    - capability: springai.model-provider
+      description: Foundry ModelProvider implementation backed by Spring AI ChatModel.
+      consumerAccess: NAMED_COMPONENTS_ONLY
+      stability: EVOLVING
+      version: 0.1.0
+      metered: false
+    - capability: springai.embedding-provider
+      description: Foundry EmbeddingProvider implementation backed by Spring AI EmbeddingModel.
+      consumerAccess: NAMED_COMPONENTS_ONLY
+      stability: EVOLVING
+      version: 0.1.0
+      metered: false
+    - capability: springai.vector-store
+      description: Foundry VectorStore implementation backed by Spring AI VectorStore.
+      consumerAccess: NAMED_COMPONENTS_ONLY
+      stability: EVOLVING
+      version: 0.1.0
+      metered: false
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-springai-adapter:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    defaultMode: IN_PROCESS
+    supportedModes: [IN_PROCESS]
+  componentShapeProfile:
+    defaultShape: IN_PROCESS_LIBRARY
+    supportedShapes: [IN_PROCESS_LIBRARY]
+    shapeRuntime: {}

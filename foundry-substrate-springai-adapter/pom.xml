@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Spring AI adapter — implements foundry's ModelProvider /
+  EmbeddingProvider / VectorStore ports by wrapping the corresponding
+  Spring AI primitives. The customer wires their preferred Spring AI
+  provider starter (spring-ai-openai-spring-boot-starter, anthropic,
+  azure, ollama, bedrock, ...) and any VectorStore implementation;
+  this adapter routes foundry's port calls through those beans without
+  the substrate code having to know which provider is configured.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.unfurl.foundry.substrate</groupId>
+        <artifactId>unfurl-foundry-substrate</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>foundry-substrate-springai-adapter</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-ports</artifactId>
+        </dependency>
+
+        <!-- Spring AI primitives. Compile-time only against the model
+             interfaces and vector-store API; provider starters
+             (OpenAI / Anthropic / ...) are the customer's deployment
+             choice and stay out of this artifact. -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-vector-store</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
