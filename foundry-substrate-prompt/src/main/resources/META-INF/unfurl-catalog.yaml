@@ -1,0 +1,51 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:prompt
+    name: foundry-substrate-prompt
+    kind: COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Deterministic prompt composition substrate for Foundry intelligent components.
+    concerns:
+      - concern: prompt.compose
+        description: Compose a deterministic prompt from a template + structured inputs.
+      - concern: prompt.template
+        description: Render a registered prompt template.
+    boundaryPrinciples:
+      - Deterministic composition; no model invocation.
+      - Templates are inputs; the substrate does not ship customer prompts.
+  refusals:
+    - responsibility: prompt.execute
+      reason: This substrate composes prompts only; execution is the LLM advisor's responsibility.
+      redirectTo: urn:unfurl:advisor
+      required: false
+  dependencies:
+    needs: []
+  offers:
+    - capability: prompt.compose
+      description: Compose a prompt from a registered template plus structured inputs.
+      consumerAccess: NAMED_COMPONENTS_ONLY
+      stability: STABLE
+      version: 0.1.0
+      metered: false
+    - capability: prompt.template
+      description: Render a registered prompt template.
+      consumerAccess: NAMED_COMPONENTS_ONLY
+      stability: STABLE
+      version: 0.1.0
+      metered: false
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-prompt:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    defaultMode: IN_PROCESS
+    supportedModes: [IN_PROCESS]
+  componentShapeProfile:
+    defaultShape: IN_PROCESS_LIBRARY
+    supportedShapes: [IN_PROCESS_LIBRARY]
+    shapeRuntime: {}

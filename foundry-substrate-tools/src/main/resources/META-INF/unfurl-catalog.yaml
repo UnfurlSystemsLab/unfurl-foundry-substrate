@@ -1,0 +1,48 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:tools
+    name: foundry-substrate-tools
+    kind: COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Tool-invocation substrate for Foundry intelligent components.
+    concerns:
+      - concern: tool.invoke
+        description: Invoke a registered tool by name with structured inputs.
+      - concern: tool.register
+        description: Register a host-provided tool implementation.
+    boundaryPrinciples:
+      - Tools are host-supplied; the substrate is a thin invocation surface.
+      - Deterministic dispatch; the substrate itself performs no external I/O.
+  refusals: []
+  dependencies:
+    needs:
+      - "tool.implementation@v1?owner=host"
+  offers:
+    - capability: tool.invoke
+      description: Invoke a registered tool by name with structured inputs.
+      consumerAccess: NAMED_COMPONENTS_ONLY
+      stability: STABLE
+      version: 0.1.0
+      metered: false
+    - capability: tool.register
+      description: Register a host-provided tool implementation.
+      consumerAccess: NAMED_COMPONENTS_ONLY
+      stability: STABLE
+      version: 0.1.0
+      metered: false
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-tools:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    defaultMode: IN_PROCESS
+    supportedModes: [IN_PROCESS]
+  componentShapeProfile:
+    defaultShape: IN_PROCESS_LIBRARY
+    supportedShapes: [IN_PROCESS_LIBRARY]
+    shapeRuntime: {}
