@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.unfurl.foundry.substrate.architecture.ArchitectureTest
--------------------------------------------------------------------------------
-Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.717 s -- in com.unfurl.foundry.substrate.architecture.ArchitectureTest
