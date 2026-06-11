@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sample agent claim only — a resource-only JAR shipping
+  META-INF/unfurl-catalog.yaml so the catalog scanner can discover this
+  agent in the runtime catalog. No Java code; the agent's runtime
+  behaviour is encoded entirely by its claim (offers + needs).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.unfurl.foundry.substrate</groupId>
+        <artifactId>unfurl-foundry-substrate</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sample-chatbot-agent</artifactId>
+</project>

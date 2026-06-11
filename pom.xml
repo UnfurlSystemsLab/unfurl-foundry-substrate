@@ -24,6 +24,13 @@
         <module>foundry-substrate-offers</module>
         <module>foundry-substrate-engine</module>
         <module>foundry-substrate-testing</module>
+        <!-- Sample agent claims (resource-only JARs shipping
+             META-INF/unfurl-catalog.yaml). Demonstrate plug-and-play
+             substrate selection: chatbot pulls in only the engine,
+             research adds rag, tool-using adds tools. -->
+        <module>sample-chatbot-agent</module>
+        <module>sample-research-agent</module>
+        <module>sample-tool-using-agent</module>
     </modules>
 
     <properties>

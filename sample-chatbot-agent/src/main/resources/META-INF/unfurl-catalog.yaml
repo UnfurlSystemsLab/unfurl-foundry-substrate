@@ -1,0 +1,40 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:sample:chatbot-agent
+    name: sample-chatbot-agent
+    kind: INTELLIGENT_COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Minimal sample agent — single-turn chat against a host-configured chat model. The smallest meaningful Foundry assembly.
+    concerns:
+      - concern: agent.chatbot
+        description: Single-turn or multi-turn conversational agent; no retrieval, no tool use.
+    boundaryPrinciples:
+      - "Plug-and-play minimum: declares agent.execute as its only dependency; the resolver pulls in foundry-substrate-engine and nothing else."
+      - "Provider-agnostic: the chat model is supplied by the host's Spring AI ChatClient bean via the engine's spring-ai.chat-client need."
+  refusals: []
+  dependencies:
+    needs:
+      - "agent.execute@v1"
+  offers:
+    - capability: agent.chatbot
+      description: Conversational agent surface. Hosts dispatch user messages to this capability to get the agent's reply.
+      consumerAccess: ANY
+      stability: EVOLVING
+      version: 0.1.0
+      metered: false
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:sample-chatbot-agent:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    defaultMode: IN_PROCESS
+    supportedModes: [IN_PROCESS]
+  componentShapeProfile:
+    defaultShape: IN_PROCESS_LIBRARY
+    supportedShapes: [IN_PROCESS_LIBRARY]
+    shapeRuntime: {}
