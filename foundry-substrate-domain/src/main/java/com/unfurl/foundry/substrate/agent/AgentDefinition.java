@@ -23,8 +23,23 @@ public record AgentDefinition(
         Map<String, Object> inputSchema,
         String defaultModelRef,
         List<String> toolRefs,
-        BudgetPolicy budgetPolicy
+        BudgetPolicy budgetPolicy,
+        List<String> skillRefs
 ) {
+    public AgentDefinition(
+            String id,
+            String version,
+            Map<String, Object> metadata,
+            List<AgentPhase> phases,
+            List<EdgeDefinition> edges,
+            Map<String, Object> inputSchema,
+            String defaultModelRef,
+            List<String> toolRefs,
+            BudgetPolicy budgetPolicy
+    ) {
+        this(id, version, metadata, phases, edges, inputSchema, defaultModelRef, toolRefs, budgetPolicy, List.of());
+    }
+
     public AgentDefinition(
             String id,
             String version,
@@ -35,7 +50,7 @@ public record AgentDefinition(
             String defaultModelRef,
             List<String> toolRefs
     ) {
-        this(id, version, metadata, phases, edges, inputSchema, defaultModelRef, toolRefs, BudgetPolicy.none());
+        this(id, version, metadata, phases, edges, inputSchema, defaultModelRef, toolRefs, BudgetPolicy.none(), List.of());
     }
 
     public AgentDefinition {
@@ -45,5 +60,6 @@ public record AgentDefinition(
         inputSchema = inputSchema == null ? Map.of() : Map.copyOf(inputSchema);
         toolRefs = toolRefs == null ? List.of() : List.copyOf(toolRefs);
         budgetPolicy = budgetPolicy == null ? BudgetPolicy.none() : budgetPolicy;
+        skillRefs = skillRefs == null ? List.of() : List.copyOf(skillRefs);
     }
 }

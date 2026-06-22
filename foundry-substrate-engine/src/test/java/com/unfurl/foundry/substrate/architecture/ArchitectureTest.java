@@ -159,7 +159,7 @@ class ArchitectureTest {
         String remainder = packageName.substring((ROOT + ".").length());
         String top = remainder.split("\\.")[0];
         return switch (top) {
-            case "agent", "embedding", "model", "runstate", "tool" -> "domain";
+            case "agent", "embedding", "model", "runstate", "skill", "tool" -> "domain";
             case "events", "ports", "prompt", "tools", "rag", "resolver", "serialization", "offers", "testing", "engine" -> top;
             case "guardrail" -> "ports";
             default -> null;

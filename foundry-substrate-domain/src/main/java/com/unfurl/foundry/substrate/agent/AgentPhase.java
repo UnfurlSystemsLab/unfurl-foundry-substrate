@@ -21,13 +21,30 @@ public record AgentPhase(
         Map<String, Object> input,
         Map<String, Object> outputMapping,
         List<String> dependencies,
-        int maxToolIterations
+        int maxToolIterations,
+        List<String> skillRefs
 ) {
+    public AgentPhase(
+            String id,
+            String promptTemplateRef,
+            String modelRef,
+            List<String> allowedToolRefs,
+            String ragQueryRef,
+            Map<String, Object> input,
+            Map<String, Object> outputMapping,
+            List<String> dependencies,
+            int maxToolIterations
+    ) {
+        this(id, promptTemplateRef, modelRef, allowedToolRefs, ragQueryRef, input, outputMapping, dependencies,
+                maxToolIterations, List.of());
+    }
+
     public AgentPhase {
         allowedToolRefs = allowedToolRefs == null ? List.of() : List.copyOf(allowedToolRefs);
         input = input == null ? Map.of() : Map.copyOf(input);
         outputMapping = outputMapping == null ? Map.of() : Map.copyOf(outputMapping);
         dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
+        skillRefs = skillRefs == null ? List.of() : List.copyOf(skillRefs);
         if (maxToolIterations < 0) {
             throw new IllegalArgumentException("maxToolIterations must be >= 0");
         }

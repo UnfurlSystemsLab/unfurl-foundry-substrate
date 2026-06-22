@@ -15,6 +15,7 @@ public final class AiOffers {
     public static final String TOOL_CALL = "tool.call";
     public static final String RAG_SEARCH = "rag.search";
     public static final String PROVIDER_CALL = "provider.call";
+    public static final String SKILL_INVOKE = "skill.invoke";
 
     private AiOffers() {
     }
@@ -24,7 +25,9 @@ public final class AiOffers {
                 metered(AGENT_RUN, "Run an agent", "start", version, "AgentInput", "AgentOutput", "tokens"),
                 unmetered(TOOL_CALL, "Call an allowed tool", "execute", version, "ToolCallRequest", "ToolCallResult"),
                 metered(RAG_SEARCH, "Retrieve grounded context", "retrieve", version, "RagQuery", "RagResult", "tokens"),
-                metered(PROVIDER_CALL, "Call a configured model provider", "complete", version, "ModelRequest", "ModelResponse", "tokens")
+                metered(PROVIDER_CALL, "Call a configured model provider", "complete", version, "ModelRequest", "ModelResponse", "tokens"),
+                metered(SKILL_INVOKE, "Resolve and invoke a governed skill", "invoke", version,
+                        "SkillInvocationRequest", "SkillInvocationResult", "tokens")
         );
     }
 
