@@ -24,6 +24,10 @@
             <artifactId>substrate-composition-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.unfurl.substrate</groupId>
+            <artifactId>substrate-domain</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.unfurl.dcp</groupId>
             <artifactId>unfurl-dcp</artifactId>
         </dependency>
