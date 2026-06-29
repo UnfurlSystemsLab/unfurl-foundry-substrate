@@ -1,0 +1,46 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:serialization
+    name: foundry-substrate-serialization
+    kind: COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Foundry definition (de)serialization — stable JSON/YAML codecs for agent and workflow definitions.
+    concerns:
+      - concern: foundry.serialization
+        description: Deterministic, schema-stable byte<->object codecs for Foundry definitions.
+    boundary_principles:
+      - Deterministic, schema-stable serialization; same definition always yields the same bytes.
+      - Maps bytes to and from objects only; performs no durable storage.
+  refusals:
+    - concern: persistence
+      rationale: Maps definitions to and from bytes only; durable storage is a host-bound run-store concern outside this module.
+      owned_by: urn:host
+  dependencies:
+    needs: []
+  offers:
+    - capability: foundry.serialization
+      description: Stable codecs for Foundry agent and workflow definitions.
+      consumer_access: NAMED_COMPONENTS_ONLY
+      stability: STABLE
+      version: 0.1.0
+      metered: false
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-serialization:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

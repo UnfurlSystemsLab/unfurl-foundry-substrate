@@ -12,10 +12,13 @@ claim:
         description: Vector / hybrid retrieval over an indexed corpus.
       - concern: rag.embed
         description: Embed query and document text for retrieval.
-    boundaryPrinciples:
+    boundary_principles:
       - In-process library; no network egress unless an embedding provider is configured.
       - Corpus configuration is host-bound; no design-time index is shipped in the JAR.
-  refusals: []
+  refusals:
+    - concern: rag.corpus-backend
+      rationale: RAG does not own the vector store or embedding provider; those are host-supplied Spring AI beans selected at deployment time.
+      owned_by: urn:host
   dependencies:
     needs:
       # Both deps are host-owned. The corpus is the customer's vector
@@ -30,16 +33,34 @@ claim:
   offers:
     - capability: rag.search
       description: Retrieve passages relevant to a query from a configured corpus.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: EVOLVING
       version: 0.1.0
       metered: false
     - capability: rag.embed
       description: Compute embeddings for query/document text.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: EVOLVING
       version: 0.1.0
       metered: false
+  negotiation_surface:
+    endpoint: in-process:foundry-substrate-rag
+    protocols_supported: [IN_PROCESS]
+    supported_intents:
+      - intent: bind-corpus
+        description: Confirm the host-supplied vector store backend used for retrieval.
+      - intent: bind-embedding-client
+        description: Confirm the host-supplied Spring AI embedding client.
+    answer_grounding:
+      - claim.offers
+      - claim.dependencies
+    limitations:
+      - No corpus or index is shipped in the JAR; both are host-bound.
+      - No network egress unless an embedding provider is configured.
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
 catalog:
   lifecycle:
     status: ACTIVE
@@ -48,9 +69,9 @@ catalog:
     packaging: jar
     source: catalog
   binding:
-    defaultMode: IN_PROCESS
-    supportedModes: [IN_PROCESS]
-  componentShapeProfile:
-    defaultShape: IN_PROCESS_LIBRARY
-    supportedShapes: [IN_PROCESS_LIBRARY]
-    shapeRuntime: {}
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

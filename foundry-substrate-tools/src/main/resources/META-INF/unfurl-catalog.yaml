@@ -12,26 +12,33 @@ claim:
         description: Invoke a registered tool by name with structured inputs.
       - concern: tool.register
         description: Register a host-provided tool implementation.
-    boundaryPrinciples:
+    boundary_principles:
       - Tools are host-supplied; the substrate is a thin invocation surface.
       - Deterministic dispatch; the substrate itself performs no external I/O.
-  refusals: []
+  refusals:
+    - concern: tool.implementation
+      rationale: The tools substrate dispatches to host-supplied tool implementations by name; it does not implement any tool itself.
+      owned_by: urn:host
   dependencies:
     needs:
       - "tool.implementation@v1?owner=host"
   offers:
     - capability: tool.invoke
       description: Invoke a registered tool by name with structured inputs.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: STABLE
       version: 0.1.0
       metered: false
     - capability: tool.register
       description: Register a host-provided tool implementation.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: STABLE
       version: 0.1.0
       metered: false
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
 catalog:
   lifecycle:
     status: ACTIVE
@@ -40,9 +47,9 @@ catalog:
     packaging: jar
     source: catalog
   binding:
-    defaultMode: IN_PROCESS
-    supportedModes: [IN_PROCESS]
-  componentShapeProfile:
-    defaultShape: IN_PROCESS_LIBRARY
-    supportedShapes: [IN_PROCESS_LIBRARY]
-    shapeRuntime: {}
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

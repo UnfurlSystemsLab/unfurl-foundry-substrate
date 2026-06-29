@@ -1,0 +1,46 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:events
+    name: foundry-substrate-events
+    kind: COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Foundry agent event vocabulary — typed agent lifecycle events emitted by the runtime.
+    concerns:
+      - concern: foundry.events
+        description: Typed AgentEvent / AgentEventType values describing agent run, phase, and tool lifecycle transitions.
+    boundary_principles:
+      - Event vocabulary only; defines no transport, sink, or delivery mechanism.
+      - Event sinks are host-bound; this module ships no I/O.
+  refusals:
+    - concern: event.transport
+      rationale: Defines event types only; delivering or persisting events is a host-bound sink concern outside this module.
+      owned_by: urn:host
+  dependencies:
+    needs: []
+  offers:
+    - capability: foundry.events
+      description: The typed agent event vocabulary emitted across the Foundry substrate.
+      consumer_access: NAMED_COMPONENTS_ONLY
+      stability: STABLE
+      version: 0.1.0
+      metered: false
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-events:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

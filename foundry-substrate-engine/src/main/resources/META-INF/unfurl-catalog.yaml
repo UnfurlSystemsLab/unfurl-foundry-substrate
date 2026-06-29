@@ -10,15 +10,14 @@ claim:
     concerns:
       - concern: agent.execute
         description: Execute an agent's reasoning loop against a host-supplied Spring AI chat client, optionally enriched with substrate plugins (RAG / tools / prompt templates) that the agent declares as needs.
-    boundaryPrinciples:
+    boundary_principles:
       - "Plug-and-play composition: the engine itself only needs a chat client; RAG and tools substrates are pulled in only when the agent's own needs request them."
       - "Model-agnostic by construction: the engine consumes a Spring AI ChatClient bean wired by the host's Spring context, so the LLM provider is a deployment decision rather than a fabric-composition decision."
       - "Customer-controlled secrets: API keys and host configuration travel via host-supplied Spring beans, never via Fabric design-time state."
   refusals:
-    - responsibility: ai.provider.implementation
-      reason: The engine delegates provider-specific HTTP / SDK calls to Spring AI's provider starters; it does not implement Anthropic / OpenAI / Azure / Ollama wire formats itself.
-      redirectTo: urn:spring:ai
-      required: false
+    - concern: ai.provider.implementation
+      rationale: The engine delegates provider-specific HTTP / SDK calls to Spring AI's provider starters; it does not implement Anthropic / OpenAI / Azure / Ollama wire formats itself.
+      owned_by: urn:spring:ai
   dependencies:
     needs:
       # Host-supplied Spring AI ChatClient bean. owner=host marks this as
@@ -28,10 +27,28 @@ claim:
   offers:
     - capability: agent.execute
       description: Run an agent's reasoning loop; substrate plugins are discovered via the assembly composition, not via runtime configuration.
-      consumerAccess: ANY
+      consumer_access: ANY
       stability: EVOLVING
       version: 0.1.0
       metered: false
+  negotiation_surface:
+    endpoint: in-process:foundry-substrate-engine
+    protocols_supported: [IN_PROCESS]
+    supported_intents:
+      - intent: bind-chat-client
+        description: Confirm the host supplies a Spring AI ChatClient bean for agent execution.
+      - intent: declare-substrate-plugins
+        description: Declare which RAG / tool / prompt substrates the agent's needs pull in.
+    answer_grounding:
+      - claim.offers
+      - claim.dependencies
+    limitations:
+      - The engine requires a host-supplied chat client; it selects no LLM provider itself.
+      - Substrate plugins are composed from the agent's declared needs, not from runtime configuration.
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
 catalog:
   lifecycle:
     status: ACTIVE
@@ -40,9 +57,9 @@ catalog:
     packaging: jar
     source: catalog
   binding:
-    defaultMode: IN_PROCESS
-    supportedModes: [IN_PROCESS]
-  componentShapeProfile:
-    defaultShape: IN_PROCESS_LIBRARY
-    supportedShapes: [IN_PROCESS_LIBRARY]
-    shapeRuntime: {}
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

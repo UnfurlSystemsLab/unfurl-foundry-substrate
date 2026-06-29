@@ -14,15 +14,14 @@ claim:
         description: Routes foundry EmbeddingProvider calls through a Spring AI EmbeddingModel bean.
       - concern: springai.vector-store
         description: Routes foundry VectorStore upsert/query through a Spring AI VectorStore bean.
-    boundaryPrinciples:
+    boundary_principles:
       - "Provider-agnostic by construction: the customer picks the Spring AI provider (OpenAI, Anthropic, Azure, Ollama, Bedrock, ...) by wiring their preferred starter; this adapter speaks foundry's neutral port interfaces."
       - "No design-time secrets: API keys, deployment ids, and vector-store credentials travel via the host's Spring context, never via Fabric design-time state."
       - "Plug-in, not replacement: foundry substrates that take foundry's ModelProvider / EmbeddingProvider / VectorStore ports work unchanged when this adapter is the implementation."
   refusals:
-    - responsibility: ai.provider.implementation
-      reason: This adapter wraps Spring AI, which is itself the source of provider-specific wire formats. The adapter never speaks Anthropic / OpenAI / Azure / Ollama formats directly.
-      redirectTo: urn:spring:ai
-      required: false
+    - concern: ai.provider.implementation
+      rationale: This adapter wraps Spring AI, which is itself the source of provider-specific wire formats; the adapter never speaks Anthropic / OpenAI / Azure / Ollama formats directly.
+      owned_by: urn:spring:ai
   dependencies:
     needs:
       # Host-supplied Spring AI beans. Each is owner=host because the
@@ -34,22 +33,26 @@ claim:
   offers:
     - capability: springai.model-provider
       description: Foundry ModelProvider implementation backed by Spring AI ChatModel.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: EVOLVING
       version: 0.1.0
       metered: false
     - capability: springai.embedding-provider
       description: Foundry EmbeddingProvider implementation backed by Spring AI EmbeddingModel.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: EVOLVING
       version: 0.1.0
       metered: false
     - capability: springai.vector-store
       description: Foundry VectorStore implementation backed by Spring AI VectorStore.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: EVOLVING
       version: 0.1.0
       metered: false
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
 catalog:
   lifecycle:
     status: ACTIVE
@@ -58,9 +61,9 @@ catalog:
     packaging: jar
     source: catalog
   binding:
-    defaultMode: IN_PROCESS
-    supportedModes: [IN_PROCESS]
-  componentShapeProfile:
-    defaultShape: IN_PROCESS_LIBRARY
-    supportedShapes: [IN_PROCESS_LIBRARY]
-    shapeRuntime: {}
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

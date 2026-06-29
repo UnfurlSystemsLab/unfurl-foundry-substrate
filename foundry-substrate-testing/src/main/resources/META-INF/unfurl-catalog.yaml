@@ -1,0 +1,46 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:testing
+    name: foundry-substrate-testing
+    kind: COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Foundry substrate test-support fixtures — deterministic in-memory fakes (StaticProviderRegistry, RecordingToolExecutor) for exercising foundry substrates.
+    concerns:
+      - concern: foundry.testing
+        description: Deterministic in-memory fakes and recorders used by tests of the foundry substrates.
+    boundary_principles:
+      - Test-support scope; deterministic fakes intended for tests, not production wiring.
+      - Fakes perform no external I/O and reach no network or provider.
+  refusals:
+    - concern: production.use
+      rationale: Provides test fakes only; production deployments must wire real provider, tool, and registry implementations instead.
+      owned_by: urn:host
+  dependencies:
+    needs: []
+  offers:
+    - capability: foundry.testing
+      description: In-memory test fakes and recorders for the Foundry substrate ports.
+      consumer_access: NAMED_COMPONENTS_ONLY
+      stability: EVOLVING
+      version: 0.1.0
+      metered: false
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
+catalog:
+  lifecycle:
+    status: EXPERIMENTAL
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-testing:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

@@ -10,10 +10,13 @@ claim:
     concerns:
       - concern: agent.research
         description: Answer questions by retrieving relevant passages from a vector corpus and grounding the chat reply in them.
-    boundaryPrinciples:
+    boundary_principles:
       - "Plug-and-play retrieval: pulls in foundry-substrate-rag through the rag.search@v1 need; tools and flow substrates are excluded by absence-of-need."
       - "The corpus and embedding model are host-owned (rag's own ?owner=host needs), so the customer's Spring AI context governs provider selection."
-  refusals: []
+  refusals:
+    - concern: rag.corpus-backend
+      rationale: The research agent does not own the vector store or embedding provider; retrieval is delegated to foundry-substrate-rag over host-supplied beans.
+      owned_by: urn:host
   dependencies:
     needs:
       - "agent.execute@v1"
@@ -21,10 +24,26 @@ claim:
   offers:
     - capability: agent.research
       description: Retrieval-grounded conversational agent. Hosts pass research questions to this capability.
-      consumerAccess: ANY
+      consumer_access: ANY
       stability: EVOLVING
       version: 0.1.0
       metered: false
+  negotiation_surface:
+    endpoint: in-process:sample-research-agent
+    protocols_supported: [IN_PROCESS]
+    supported_intents:
+      - intent: confirm-retrieval
+        description: Confirm this agent needs agent.execute and rag.search (retrieval-grounded, no tools).
+    answer_grounding:
+      - claim.offers
+      - claim.dependencies
+    limitations:
+      - Retrieval-grounded only; no tool use or workflow orchestration.
+      - Corpus and embedding model are host-supplied via the RAG substrate.
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
 catalog:
   lifecycle:
     status: ACTIVE
@@ -33,9 +52,9 @@ catalog:
     packaging: jar
     source: catalog
   binding:
-    defaultMode: IN_PROCESS
-    supportedModes: [IN_PROCESS]
-  componentShapeProfile:
-    defaultShape: IN_PROCESS_LIBRARY
-    supportedShapes: [IN_PROCESS_LIBRARY]
-    shapeRuntime: {}
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

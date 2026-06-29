@@ -10,10 +10,13 @@ claim:
     concerns:
       - concern: agent.tool-using
         description: Agent that decides when to call host-registered tools (calculator / search / domain APIs) and weaves their results back into the chat reply.
-    boundaryPrinciples:
+    boundary_principles:
       - "Plug-and-play tooling: pulls in foundry-substrate-tools through the tool.invoke@v1 need; RAG and flow substrates are excluded by absence-of-need."
       - "Tool implementations are host-owned (tools' own tool.implementation?owner=host need), so the agent gains capabilities by the host registering more Spring AI ToolCallback beans — never by changing the fabric composition."
-  refusals: []
+  refusals:
+    - concern: tool.implementation
+      rationale: The agent decides when to call tools but does not implement them; tool implementations are host-registered Spring AI ToolCallback beans.
+      owned_by: urn:host
   dependencies:
     needs:
       - "agent.execute@v1"
@@ -21,10 +24,26 @@ claim:
   offers:
     - capability: agent.tool-using
       description: Function-calling agent surface. Hosts dispatch user messages to this capability to drive tool-augmented replies.
-      consumerAccess: ANY
+      consumer_access: ANY
       stability: EVOLVING
       version: 0.1.0
       metered: false
+  negotiation_surface:
+    endpoint: in-process:sample-tool-using-agent
+    protocols_supported: [IN_PROCESS]
+    supported_intents:
+      - intent: confirm-tools
+        description: Confirm this agent needs agent.execute and tool.invoke (tool-augmented, no retrieval).
+    answer_grounding:
+      - claim.offers
+      - claim.dependencies
+    limitations:
+      - Tool-augmented only; no retrieval or workflow orchestration.
+      - Tool implementations are host-registered; the agent implements none itself.
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
 catalog:
   lifecycle:
     status: ACTIVE
@@ -33,9 +52,9 @@ catalog:
     packaging: jar
     source: catalog
   binding:
-    defaultMode: IN_PROCESS
-    supportedModes: [IN_PROCESS]
-  componentShapeProfile:
-    defaultShape: IN_PROCESS_LIBRARY
-    supportedShapes: [IN_PROCESS_LIBRARY]
-    shapeRuntime: {}
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

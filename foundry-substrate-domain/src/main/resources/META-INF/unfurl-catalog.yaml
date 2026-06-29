@@ -1,0 +1,46 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:domain
+    name: foundry-substrate-domain
+    kind: COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Foundry substrate domain model — immutable agent, skill, tool, prompt, and workflow-phase definitions shared across the substrate.
+    concerns:
+      - concern: foundry.domain-model
+        description: Immutable domain records (AgentDefinition, AgentPhase, SkillDefinition, ToolDefinition) consumed by the engine, resolver, and offers.
+    boundary_principles:
+      - Pure data model; carries no behavior, I/O, or model invocation.
+      - Records are immutable; semantic validation lives in the dedicated validators, not here.
+  refusals:
+    - concern: agent.execution
+      rationale: Defines the agent/skill/tool shapes only; executing them is the orchestration engine's responsibility.
+      owned_by: urn:unfurl:foundry:engine
+  dependencies:
+    needs: []
+  offers:
+    - capability: foundry.domain-model
+      description: The shared immutable definition records for Foundry agents, skills, tools, and prompts.
+      consumer_access: NAMED_COMPONENTS_ONLY
+      stability: STABLE
+      version: 0.1.0
+      metered: false
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-domain:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

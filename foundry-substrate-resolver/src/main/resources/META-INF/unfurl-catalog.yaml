@@ -1,0 +1,46 @@
+claim:
+  identity:
+    uri: urn:unfurl:foundry:resolver
+    name: foundry-substrate-resolver
+    kind: COMPONENT
+    version: 0.1.0
+    publisher: Unfurl
+  domain:
+    summary: Foundry reference resolution — resolves agentRef / toolRef / promptRef / dataRef in agent definitions to concrete registered definitions.
+    concerns:
+      - concern: foundry.reference-resolution
+        description: Deterministically resolve symbolic references in agent definitions against a host-supplied definition registry.
+    boundary_principles:
+      - Deterministic resolution; performs no model reasoning.
+      - Operates over a host-supplied registry; ships no definitions of its own.
+  refusals:
+    - concern: agent.execution
+      rationale: Resolves references for the engine to consume; it does not execute agent phases or call tools itself.
+      owned_by: urn:unfurl:foundry:engine
+  dependencies:
+    needs: []
+  offers:
+    - capability: foundry.reference-resolution
+      description: Resolve symbolic agent/tool/prompt/data references to registered definitions.
+      consumer_access: NAMED_COMPONENTS_ONLY
+      stability: STABLE
+      version: 0.1.0
+      metered: false
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
+catalog:
+  lifecycle:
+    status: ACTIVE
+  artifact:
+    coordinates: com.unfurl.foundry.substrate:foundry-substrate-resolver:0.1.0
+    packaging: jar
+    source: catalog
+  binding:
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}

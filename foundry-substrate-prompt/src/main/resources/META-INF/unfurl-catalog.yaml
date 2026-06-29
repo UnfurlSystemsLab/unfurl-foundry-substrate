@@ -12,29 +12,32 @@ claim:
         description: Compose a deterministic prompt from a template + structured inputs.
       - concern: prompt.template
         description: Render a registered prompt template.
-    boundaryPrinciples:
+    boundary_principles:
       - Deterministic composition; no model invocation.
       - Templates are inputs; the substrate does not ship customer prompts.
   refusals:
-    - responsibility: prompt.execute
-      reason: This substrate composes prompts only; execution is the LLM advisor's responsibility.
-      redirectTo: urn:unfurl:advisor
-      required: false
+    - concern: prompt.execute
+      rationale: This substrate composes prompts only; executing them against a model is the LLM advisor's responsibility.
+      owned_by: urn:unfurl:advisor
   dependencies:
     needs: []
   offers:
     - capability: prompt.compose
       description: Compose a prompt from a registered template plus structured inputs.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: STABLE
       version: 0.1.0
       metered: false
     - capability: prompt.template
       description: Render a registered prompt template.
-      consumerAccess: NAMED_COMPONENTS_ONLY
+      consumer_access: NAMED_COMPONENTS_ONLY
       stability: STABLE
       version: 0.1.0
       metered: false
+  metadata:
+    dcp_version: "0.2.0"
+    claim_version: "0.1.0"
+    created_at: "1970-01-01T00:00:00Z"
 catalog:
   lifecycle:
     status: ACTIVE
@@ -43,9 +46,9 @@ catalog:
     packaging: jar
     source: catalog
   binding:
-    defaultMode: IN_PROCESS
-    supportedModes: [IN_PROCESS]
-  componentShapeProfile:
-    defaultShape: IN_PROCESS_LIBRARY
-    supportedShapes: [IN_PROCESS_LIBRARY]
-    shapeRuntime: {}
+    default_mode: IN_PROCESS
+    supported_modes: [IN_PROCESS]
+  component_shape_profile:
+    default_shape: IN_PROCESS_LIBRARY
+    supported_shapes: [IN_PROCESS_LIBRARY]
+    shape_runtime: {}
