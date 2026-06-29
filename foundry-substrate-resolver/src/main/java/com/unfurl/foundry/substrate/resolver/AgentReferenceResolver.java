@@ -16,15 +16,24 @@ public final class AgentReferenceResolver {
     private final Map<String, AgentDefinition> agentsByRef;
     private final Map<String, ToolDefinition> toolsByRef;
 
+/**
+ * Constructs AgentReferenceResolver with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public AgentReferenceResolver(Map<String, AgentDefinition> agentsByRef, Map<String, ToolDefinition> toolsByRef) {
         this.agentsByRef = Map.copyOf(agentsByRef);
         this.toolsByRef = Map.copyOf(toolsByRef);
     }
 
+/**
+ * Performs the resolveAgent operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     public Optional<AgentDefinition> resolveAgent(String agentRef) {
         return Optional.ofNullable(agentsByRef.get(agentRef));
     }
 
+/**
+ * Performs the resolveTool operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     public Optional<ToolDefinition> resolveTool(String toolRef) {
         return Optional.ofNullable(toolsByRef.get(toolRef));
     }

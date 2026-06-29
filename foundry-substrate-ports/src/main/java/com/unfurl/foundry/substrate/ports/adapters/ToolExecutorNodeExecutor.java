@@ -11,13 +11,23 @@ import com.unfurl.substrate.ports.NodeExecutor;
 import java.util.Map;
 
 /** Substrate node adapter for the canonical {@code tool.call} AI capability. */
+/**
+ * class for the Foundry AI substrate surface; documents the ToolExecutorNodeExecutor contract used by DCP ports, adapters, or domain code.
+ * Inputs and outputs remain defined by the declared fields and methods, with validation kept inside this type where present.
+ */
 public final class ToolExecutorNodeExecutor implements NodeExecutor {
     private final ToolExecutor executor;
 
+/**
+ * Constructs ToolExecutorNodeExecutor with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public ToolExecutorNodeExecutor(ToolExecutor executor) {
         this.executor = executor;
     }
 
+/**
+ * Performs the execute operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     @Override
     public NodeExecutionResult execute(NodeExecutionRequest request, ExecutionContext context) {
         String toolName = stringValue(request.input().getOrDefault("toolName",
@@ -31,10 +41,16 @@ public final class ToolExecutorNodeExecutor implements NodeExecutor {
         return NodeExecutionResult.completed(result.output());
     }
 
+/**
+ * Implements the stringValue helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private String stringValue(Object value) {
         return value == null ? null : String.valueOf(value);
     }
 
+/**
+ * Implements the mapValue helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @SuppressWarnings("unchecked")
     private Map<String, Object> mapValue(Object value, Map<String, Object> fallback) {
         if (value instanceof Map<?, ?>) {

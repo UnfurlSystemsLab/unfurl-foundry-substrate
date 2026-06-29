@@ -23,6 +23,9 @@ public record SkillDefinition(
         Map<String, Object> outputSchema,
         Map<String, Object> metadata
 ) {
+/**
+ * Constructs SkillDefinition with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public SkillDefinition {
         toolRefs = toolRefs == null ? List.of() : List.copyOf(toolRefs);
         ragSourceRefs = ragSourceRefs == null ? List.of() : List.copyOf(ragSourceRefs);

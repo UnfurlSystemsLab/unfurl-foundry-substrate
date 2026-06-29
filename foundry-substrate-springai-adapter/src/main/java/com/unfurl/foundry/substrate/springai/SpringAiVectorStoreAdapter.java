@@ -38,10 +38,16 @@ public final class SpringAiVectorStoreAdapter implements VectorStore {
 
     private final org.springframework.ai.vectorstore.VectorStore springStore;
 
+/**
+ * Constructs SpringAiVectorStoreAdapter with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public SpringAiVectorStoreAdapter(org.springframework.ai.vectorstore.VectorStore springStore) {
         this.springStore = Objects.requireNonNull(springStore, "springStore is required");
     }
 
+/**
+ * Implements the upsert helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public void upsert(String collection, List<Chunk> chunks, ExecutionContext context) {
         if (chunks == null || chunks.isEmpty()) {
@@ -76,6 +82,9 @@ public final class SpringAiVectorStoreAdapter implements VectorStore {
         springStore.add(documents);
     }
 
+/**
+ * Implements the query helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public RagResult query(RagQuery query, ExecutionContext context) {
         SearchRequest.Builder builder = SearchRequest.builder()
@@ -97,6 +106,9 @@ public final class SpringAiVectorStoreAdapter implements VectorStore {
         return new RagResult(chunks, Map.of());
     }
 
+/**
+ * Implements the toChunk helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private Chunk toChunk(Document document) {
         Map<String, Object> metadata = document.getMetadata() == null
                 ? Map.of()
@@ -115,6 +127,9 @@ public final class SpringAiVectorStoreAdapter implements VectorStore {
                 Map.copyOf(metadata));
     }
 
+/**
+ * Implements the stringOrNull helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private static String stringOrNull(Object value) {
         return value == null ? null : String.valueOf(value);
     }

@@ -7,9 +7,16 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Structural validator for resolve-time skill definitions. */
+/**
+ * class for the Foundry AI substrate surface; documents the SkillDefinitionValidator contract used by DCP ports, adapters, or domain code.
+ * Inputs and outputs remain defined by the declared fields and methods, with validation kept inside this type where present.
+ */
 public final class SkillDefinitionValidator {
     private static final Pattern SEMVER = Pattern.compile("^(0|[1-9]\\d*)(\\.(0|[1-9]\\d*)){2}(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$");
 
+/**
+ * Performs the validate operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     public void validate(SkillDefinition skill) {
         List<String> errors = new ArrayList<>();
         if (skill == null) {

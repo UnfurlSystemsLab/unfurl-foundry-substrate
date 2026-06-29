@@ -20,6 +20,9 @@ import java.util.stream.Collectors;
 public final class AgentDefinitionValidator {
     private static final Pattern PHASE_ID = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_-]*$");
 
+/**
+ * Performs the validate operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     public void validate(AgentDefinition agent) {
         List<String> errors = new ArrayList<>();
         Map<String, AgentPhase> phasesById = new HashMap<>();
@@ -47,6 +50,9 @@ public final class AgentDefinitionValidator {
         }
     }
 
+/**
+ * Performs the validateReferences operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private void validateReferences(AgentDefinition agent, List<String> errors) {
         Set<String> declaredTools = Set.copyOf(agent.toolRefs());
         Set<String> declaredModels = declaredSet(agent.metadata().get("modelRefs"));
@@ -72,6 +78,9 @@ public final class AgentDefinitionValidator {
         }
     }
 
+/**
+ * Implements the declaredSet helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private Set<String> declaredSet(Object value) {
         if (value instanceof Iterable<?> iterable) {
             Set<String> values = new HashSet<>();
@@ -85,6 +94,9 @@ public final class AgentDefinitionValidator {
         return Set.of();
     }
 
+/**
+ * Performs the validateDependencies operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private void validateDependencies(AgentDefinition agent, Set<String> phaseIds, List<String> errors) {
         for (AgentPhase phase : agent.phases()) {
             for (String dependency : phase.dependencies()) {
@@ -95,6 +107,9 @@ public final class AgentDefinitionValidator {
         }
     }
 
+/**
+ * Performs the validateEdges operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private void validateEdges(AgentDefinition agent, Set<String> phaseIds, List<String> errors) {
         for (EdgeDefinition edge : agent.edges()) {
             if (!phaseIds.contains(edge.from())) {
@@ -106,6 +121,9 @@ public final class AgentDefinitionValidator {
         }
     }
 
+/**
+ * Performs the validateNoCycles operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private void validateNoCycles(AgentDefinition agent, Set<String> phaseIds, List<String> errors) {
         Map<String, Integer> inDegree = phaseIds.stream().collect(Collectors.toMap(id -> id, id -> 0));
         Map<String, List<String>> adjacency = phaseIds.stream().collect(Collectors.toMap(id -> id, id -> new ArrayList<>()));
@@ -142,6 +160,9 @@ public final class AgentDefinitionValidator {
         }
     }
 
+/**
+ * Implements the addGraphEdge helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private void addGraphEdge(String from, String to, Set<String> phaseIds, Map<String, List<String>> adjacency,
                               Map<String, Integer> inDegree) {
         if (!phaseIds.contains(from) || !phaseIds.contains(to)) {

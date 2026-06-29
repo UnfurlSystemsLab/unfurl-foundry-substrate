@@ -24,6 +24,9 @@ public record AgentEvent(
         @NotNull AgentEventType eventType,
         Map<String, Object> payload
 ) {
+/**
+ * Constructs AgentEvent with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public AgentEvent {
         payload = payload == null ? Map.of() : Map.copyOf(payload);
     }

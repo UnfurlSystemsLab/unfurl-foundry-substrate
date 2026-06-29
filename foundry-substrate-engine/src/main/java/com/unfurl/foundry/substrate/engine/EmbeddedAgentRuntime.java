@@ -70,12 +70,18 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     private final AgentRunStore store;
     private final Map<String, PromptTemplate> templates;
 
+/**
+ * Constructs EmbeddedAgentRuntime with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public EmbeddedAgentRuntime(ProviderRegistry providerRegistry, ToolRegistry toolRegistry) {
         this(providerRegistry, toolRegistry, null, new BudgetPolicyCostGuardrail(), new AllowAllPermissionBridge(),
                 new NoopAgentEventSink(), new PromptAssembler(), new DataReferenceResolver(),
                 new AgentDefinitionValidator(), new InMemoryAgentRunStore(), Map.of());
     }
 
+/**
+ * Constructs EmbeddedAgentRuntime with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public EmbeddedAgentRuntime(
             ProviderRegistry providerRegistry,
             ToolRegistry toolRegistry,
@@ -102,6 +108,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         this.templates = Map.copyOf(templates);
     }
 
+/**
+ * Performs the start operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     @Override
     public AgentRunState start(AgentDefinition agent, Map<String, Object> input, ExecutionContext context) {
         validator.validate(agent);
@@ -129,6 +138,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return runScheduler(state, context);
     }
 
+/**
+ * Performs the resume operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     @Override
     public AgentRunState resume(String runId, Map<String, Object> signal, ExecutionContext context) {
         AgentRunState loaded = store.load(runId, context)
@@ -138,6 +150,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return loaded;
     }
 
+/**
+ * Performs the cancel operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     @Override
     public AgentRunState cancel(String runId, ExecutionContext context) {
         AgentRunState current = store.load(runId, context)
@@ -152,6 +167,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return cancelled;
     }
 
+/**
+ * Implements the runScheduler helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private AgentRunState runScheduler(State state, ExecutionContext context) {
         boolean progressed;
         do {
@@ -197,6 +215,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return completed;
     }
 
+/**
+ * Performs the executePhase operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private AgentPhaseState executePhase(State state, AgentPhase phase, ExecutionContext context) {
         Instant started = Instant.now();
         Map<String, Object> resolvedInput = resolver.resolveInput(phase.input(), state.agentInput, phaseOutputs(state));
@@ -274,6 +295,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 List.copyOf(toolCalls), output, null, null, started, Instant.now());
     }
 
+/**
+ * Implements the callModel helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private ModelResponse callModel(State state, AgentPhase phase, ModelProvider provider, List<Message> messages,
                                     String modelRef, ExecutionContext context) {
         ModelRequest request = new ModelRequest(List.copyOf(messages), modelRef, phase.input(), List.of(), Map.of());
@@ -287,6 +311,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return response;
     }
 
+/**
+ * Implements the providerName helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private String providerName(ModelResponse response) {
         if (response.providerName() != null && !response.providerName().isBlank()) {
             return response.providerName();
@@ -295,6 +322,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return value == null ? null : String.valueOf(value);
     }
 
+/**
+ * Implements the estimatedCostUsd helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private java.math.BigDecimal estimatedCostUsd(ModelResponse response) {
         if (response.estimatedCostUsd().signum() > 0) {
             return response.estimatedCostUsd();
@@ -312,6 +342,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return java.math.BigDecimal.ZERO;
     }
 
+/**
+ * Performs the assemble operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private List<Message> assemble(AgentPhase phase, Map<String, Object> resolvedInput) {
         if (phase.promptTemplateRef() != null && templates.containsKey(phase.promptTemplateRef())) {
             return new ArrayList<>(promptAssembler.assemble(templates.get(phase.promptTemplateRef()), resolvedInput));
@@ -324,6 +357,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return messages;
     }
 
+/**
+ * Implements the joinChunks helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private String joinChunks(RagResult rag) {
         StringBuilder sb = new StringBuilder("Context:\n");
         for (Chunk chunk : rag.chunks()) {
@@ -334,6 +370,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
 
     // --- scheduling helpers ---
 
+/**
+ * Confirms that all dependency and inbound-edge predecessors reached terminal states before a phase is eligible to run.
+ */
     private boolean predecessorsTerminal(State state, AgentPhase phase) {
         for (String dependency : phase.dependencies()) {
             if (!isTerminal(statusOf(state, dependency))) {
@@ -348,10 +387,16 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return true;
     }
 
+/**
+ * Performs the isEdgeGated operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private boolean isEdgeGated(AgentDefinition agent, AgentPhase phase) {
         return !inboundEdges(agent, phase).isEmpty();
     }
 
+/**
+ * Implements the anyInboundEdgeSatisfied helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private boolean anyInboundEdgeSatisfied(State state, AgentPhase phase) {
         for (EdgeDefinition edge : inboundEdges(state.agent, phase)) {
             if (statusOf(state, edge.from()) == AgentPhaseStatus.COMPLETED && evaluateWhen(edge.when(), state)) {
@@ -361,6 +406,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return false;
     }
 
+/**
+ * Implements the evaluateWhen helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private boolean evaluateWhen(ConditionDefinition when, State state) {
         if (when == null || when.expression() == null) {
             return true;
@@ -385,6 +433,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return value != null;
     }
 
+/**
+ * Performs the isToolAllowed operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private boolean isToolAllowed(AgentDefinition agent, AgentPhase phase, String toolName) {
         if (!agent.toolRefs().isEmpty() && !agent.toolRefs().contains(toolName)) {
             return false;
@@ -392,6 +443,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return phase.allowedToolRefs().isEmpty() || phase.allowedToolRefs().contains(toolName);
     }
 
+/**
+ * Implements the inboundEdges helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private List<EdgeDefinition> inboundEdges(AgentDefinition agent, AgentPhase phase) {
         List<EdgeDefinition> inbound = new ArrayList<>();
         for (EdgeDefinition edge : agent.edges()) {
@@ -402,16 +456,25 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return inbound;
     }
 
+/**
+ * Implements the statusOf helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private AgentPhaseStatus statusOf(State state, String phaseId) {
         AgentPhaseState ps = state.phases.get(phaseId);
         return ps == null ? AgentPhaseStatus.PENDING : ps.status();
     }
 
+/**
+ * Performs the isTerminal operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private boolean isTerminal(AgentPhaseStatus status) {
         return status == AgentPhaseStatus.COMPLETED || status == AgentPhaseStatus.SKIPPED
                 || status == AgentPhaseStatus.FAILED || status == AgentPhaseStatus.CANCELLED;
     }
 
+/**
+ * Implements the phaseOutputs helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private Map<String, Map<String, Object>> phaseOutputs(State state) {
         Map<String, Map<String, Object>> outputs = new LinkedHashMap<>();
         state.phases.forEach((id, ps) -> {
@@ -422,16 +485,25 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return outputs;
     }
 
+/**
+ * Implements the markPhase helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private void markPhase(State state, String phaseId, AgentPhaseState newState) {
         state.phases.put(phaseId, newState);
     }
 
+/**
+ * Implements the skipped helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private AgentPhaseState skipped(String phaseId) {
         Instant now = Instant.now();
         return new AgentPhaseState(phaseId, AgentPhaseStatus.SKIPPED, Map.of(), List.of(), List.of(),
                 Map.of(), null, null, now, now);
     }
 
+/**
+ * Implements the failedPhase helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private AgentPhaseState failedPhase(String phaseId, Map<String, Object> input, List<Message> messages,
                                         String errorCode, String errorMessage, Instant started) {
         return new AgentPhaseState(phaseId, AgentPhaseStatus.FAILED, input, List.copyOf(messages), List.of(),
@@ -440,10 +512,16 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
 
     // --- run-state assembly ---
 
+/**
+ * Persists a run-state checkpoint without an error payload, preserving the overload used by successful scheduler paths.
+ */
     private AgentRunState save(State state, AgentRunStatus status, ExecutionContext context) {
         return save(state, status, context, null, null);
     }
 
+/**
+ * Performs the save operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private AgentRunState save(State state, AgentRunStatus status, ExecutionContext context,
                               String errorCode, String errorMessage) {
         AgentRunState run = new AgentRunState(state.tenantId, state.runId, state.agent.id(), state.agent.version(),
@@ -453,6 +531,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return run;
     }
 
+/**
+ * Implements the withStatus helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private AgentRunState withStatus(AgentRunState run, Map<String, AgentPhaseState> phases,
                                      AgentRunStatus status, String errorCode, String errorMessage) {
         return new AgentRunState(run.tenantId(), run.runId(), run.agentId(), run.agentVersion(), status,
@@ -461,12 +542,18 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
 
     // --- events ---
 
+/**
+ * Publishes a phase-scoped lifecycle event with tenant, user, correlation, and payload context attached.
+ */
     private void emit(ExecutionContext context, State state, String phaseId, AgentEventType type, Map<String, Object> payload) {
         eventSink.publish(new AgentEvent(UUID.randomUUID().toString(), Instant.now(), state.agent.id(), state.runId,
                 phaseId, state.tenantId, context == null ? null : context.userId(),
                 context == null ? null : context.correlationId(), null, type, payload), context);
     }
 
+/**
+ * Performs the emitRun operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private void emitRun(ExecutionContext context, AgentRunState run, AgentEventType type, Map<String, Object> payload) {
         eventSink.publish(new AgentEvent(UUID.randomUUID().toString(), Instant.now(), run.agentId(), run.runId(),
                 null, run.tenantId(), context == null ? null : context.userId(),
@@ -474,6 +561,10 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     }
 
     /** Mutable working state threaded through a single run. */
+/**
+ * class for the Foundry AI substrate surface; documents the State contract used by DCP ports, adapters, or domain code.
+ * Inputs and outputs remain defined by the declared fields and methods, with validation kept inside this type where present.
+ */
     private static final class State {
         final String tenantId;
         final String runId;

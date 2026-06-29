@@ -172,7 +172,8 @@ foundry-substrate-offers
     AI capability offer fragments (DCP claim shapes for agent.run/tool.call/rag.search/provider.call),
     AgentInvocation/ToolInvocation as ContractInvocable implementations
   may depend on:
-    foundry-substrate-domain, unfurl-dcp, substrate-composition-api
+    foundry-substrate-domain, upstream substrate-domain flow definitions for projection, unfurl-dcp,
+    substrate-composition-api
 
 foundry-substrate-engine
   package:

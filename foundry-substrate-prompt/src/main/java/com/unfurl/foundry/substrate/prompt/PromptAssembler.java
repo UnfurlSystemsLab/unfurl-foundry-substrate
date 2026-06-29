@@ -19,6 +19,9 @@ import java.util.regex.Pattern;
 public final class PromptAssembler {
     private static final Pattern VARIABLE = Pattern.compile("\\{\\{\\s*([a-zA-Z0-9_.]+)\\s*}}");
 
+/**
+ * Performs the assemble operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     public List<Message> assemble(PromptTemplate template, Map<String, Object> variables) {
         List<Message> messages = new ArrayList<>();
         for (PromptSegment segment : template.segments()) {
@@ -28,6 +31,9 @@ public final class PromptAssembler {
         return List.copyOf(messages);
     }
 
+/**
+ * Implements the render helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public String render(String template, Map<String, Object> variables) {
         if (template == null) {
             return "";

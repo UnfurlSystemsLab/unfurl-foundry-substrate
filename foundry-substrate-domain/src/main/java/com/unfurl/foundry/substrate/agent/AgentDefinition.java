@@ -26,6 +26,9 @@ public record AgentDefinition(
         BudgetPolicy budgetPolicy,
         List<String> skillRefs
 ) {
+/**
+ * Constructs AgentDefinition with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public AgentDefinition(
             String id,
             String version,
@@ -40,6 +43,9 @@ public record AgentDefinition(
         this(id, version, metadata, phases, edges, inputSchema, defaultModelRef, toolRefs, budgetPolicy, List.of());
     }
 
+/**
+ * Constructs AgentDefinition with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public AgentDefinition(
             String id,
             String version,
@@ -53,6 +59,9 @@ public record AgentDefinition(
         this(id, version, metadata, phases, edges, inputSchema, defaultModelRef, toolRefs, BudgetPolicy.none(), List.of());
     }
 
+/**
+ * Constructs AgentDefinition with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public AgentDefinition {
         metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
         phases = phases == null ? List.of() : List.copyOf(phases);

@@ -19,6 +19,9 @@ public record CostAccounting(
         Map<String, Object> attribution,
         BigDecimal estimatedCostUsd
 ) {
+/**
+ * Constructs CostAccounting with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public CostAccounting(
             long promptTokens,
             long completionTokens,
@@ -29,6 +32,9 @@ public record CostAccounting(
         this(promptTokens, completionTokens, tokensByModel, tokensByProvider, attribution, BigDecimal.ZERO);
     }
 
+/**
+ * Constructs CostAccounting with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public CostAccounting {
         tokensByModel = tokensByModel == null ? Map.of() : Map.copyOf(tokensByModel);
         tokensByProvider = tokensByProvider == null ? Map.of() : Map.copyOf(tokensByProvider);
@@ -39,20 +45,32 @@ public record CostAccounting(
         }
     }
 
+/**
+ * Implements the totalTokens helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public long totalTokens() {
         return promptTokens + completionTokens;
     }
 
+/**
+ * Factory method: creates the empty result while keeping caller-facing defaults and validation in one place.
+ */
     public static CostAccounting empty(Map<String, Object> attribution) {
         return new CostAccounting(0, 0, Map.of(), Map.of(), attribution);
     }
 
     /** Returns a new accounting with the given usage folded in, attributed to model/provider. */
+/**
+ * Implements the add helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public CostAccounting add(long prompt, long completion, String modelRef, String providerName) {
         return add(prompt, completion, modelRef, providerName, BigDecimal.ZERO);
     }
 
     /** Returns a new accounting with the given usage and estimated cost folded in. */
+/**
+ * Implements the add helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public CostAccounting add(long prompt, long completion, String modelRef, String providerName, BigDecimal estimatedCostDeltaUsd) {
         Map<String, Long> byModel = new LinkedHashMap<>(tokensByModel);
         Map<String, Long> byProvider = new LinkedHashMap<>(tokensByProvider);

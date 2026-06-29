@@ -25,6 +25,9 @@ public final class AgentInvocation implements ContractInvocable {
     private final AgentDefinition agent;
     private final AgentRuntime runtime;
 
+/**
+ * Constructs AgentInvocation with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public AgentInvocation(String contractId, String contractVersion, AgentDefinition agent, AgentRuntime runtime) {
         this.contractId = contractId;
         this.contractVersion = contractVersion;
@@ -32,16 +35,25 @@ public final class AgentInvocation implements ContractInvocable {
         this.runtime = runtime;
     }
 
+/**
+ * Implements the contractId helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public String contractId() {
         return contractId;
     }
 
+/**
+ * Implements the contractVersion helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public String contractVersion() {
         return contractVersion;
     }
 
+/**
+ * Performs the invoke operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     @Override
     public ContractInvocationResult invoke(ContractInvocation invocation, ExecutionContext context) {
         AgentRunState run = runtime.start(agent, invocation.input(), context);

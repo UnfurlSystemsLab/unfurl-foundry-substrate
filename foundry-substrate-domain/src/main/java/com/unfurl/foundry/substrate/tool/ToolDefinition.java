@@ -18,6 +18,9 @@ public record ToolDefinition(
         String uses,
         Map<String, Object> metadata
 ) {
+/**
+ * Constructs ToolDefinition with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public ToolDefinition {
         inputSchema = inputSchema == null ? Map.of() : Map.copyOf(inputSchema);
         outputSchema = outputSchema == null ? Map.of() : Map.copyOf(outputSchema);

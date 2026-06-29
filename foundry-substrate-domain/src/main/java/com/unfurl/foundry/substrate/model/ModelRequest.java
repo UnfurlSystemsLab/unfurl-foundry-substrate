@@ -14,6 +14,9 @@ public record ModelRequest(
         List<Map<String, Object>> toolSchemas,
         Map<String, Object> metadata
 ) {
+/**
+ * Constructs ModelRequest with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public ModelRequest {
         messages = messages == null ? List.of() : List.copyOf(messages);
         parameters = parameters == null ? Map.of() : Map.copyOf(parameters);

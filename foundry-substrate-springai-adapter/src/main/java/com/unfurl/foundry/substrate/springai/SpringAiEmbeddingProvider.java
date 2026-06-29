@@ -29,10 +29,16 @@ import java.util.Objects;
 public final class SpringAiEmbeddingProvider implements EmbeddingProvider {
     private final EmbeddingModel embeddingModel;
 
+/**
+ * Constructs SpringAiEmbeddingProvider with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public SpringAiEmbeddingProvider(EmbeddingModel embeddingModel) {
         this.embeddingModel = Objects.requireNonNull(embeddingModel, "embeddingModel is required");
     }
 
+/**
+ * Implements the embed helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public EmbeddingResult embed(EmbeddingRequest request, ExecutionContext context) {
         EmbeddingResponse response = embeddingModel.embedForResponse(request.inputs());
@@ -43,6 +49,9 @@ public final class SpringAiEmbeddingProvider implements EmbeddingProvider {
         return new EmbeddingResult(vectors, usageFrom(response), Map.of());
     }
 
+/**
+ * Implements the usageFrom helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private ModelUsage usageFrom(EmbeddingResponse response) {
         if (response.getMetadata() == null || response.getMetadata().getUsage() == null) {
             return ModelUsage.zero();

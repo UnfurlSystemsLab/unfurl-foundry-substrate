@@ -11,10 +11,16 @@ import com.unfurl.substrate.policy.ExecutionContext;
 public final class VectorStoreRagRetriever implements RagRetriever {
     private final VectorStore vectorStore;
 
+/**
+ * Constructs VectorStoreRagRetriever with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public VectorStoreRagRetriever(VectorStore vectorStore) {
         this.vectorStore = vectorStore;
     }
 
+/**
+ * Implements the retrieve helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public RagResult retrieve(RagQuery query, ExecutionContext context) {
         return vectorStore.query(query, context);

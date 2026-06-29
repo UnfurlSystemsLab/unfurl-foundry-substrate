@@ -35,10 +35,16 @@ import java.util.Objects;
 public final class SpringAiModelProvider implements ModelProvider {
     private final ChatModel chatModel;
 
+/**
+ * Constructs SpringAiModelProvider with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public SpringAiModelProvider(ChatModel chatModel) {
         this.chatModel = Objects.requireNonNull(chatModel, "chatModel is required");
     }
 
+/**
+ * Performs the complete operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     @Override
     public ModelResponse complete(ModelRequest request, ExecutionContext context) {
         Prompt prompt = toPrompt(request);
@@ -46,6 +52,9 @@ public final class SpringAiModelProvider implements ModelProvider {
         return fromResponse(response);
     }
 
+/**
+ * Implements the toPrompt helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private Prompt toPrompt(ModelRequest request) {
         List<org.springframework.ai.chat.messages.Message> springMessages = new ArrayList<>();
         for (Message message : request.messages()) {
@@ -58,6 +67,9 @@ public final class SpringAiModelProvider implements ModelProvider {
         return new Prompt(springMessages);
     }
 
+/**
+ * Implements the toSpringMessage helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private org.springframework.ai.chat.messages.Message toSpringMessage(Message message) {
         String content = message.content() == null ? "" : message.content();
         return switch (message.role()) {
@@ -75,6 +87,9 @@ public final class SpringAiModelProvider implements ModelProvider {
         };
     }
 
+/**
+ * Factory method: creates the fromResponse result while keeping caller-facing defaults and validation in one place.
+ */
     private ModelResponse fromResponse(ChatResponse response) {
         Generation generation = response.getResult();
         AssistantMessage assistant = generation == null ? null : generation.getOutput();
@@ -87,6 +102,9 @@ public final class SpringAiModelProvider implements ModelProvider {
         return new ModelResponse(message, List.of(), finishReason, usage, java.util.Map.of());
     }
 
+/**
+ * Implements the usageFrom helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private ModelUsage usageFrom(ChatResponse response) {
         if (response.getMetadata() == null || response.getMetadata().getUsage() == null) {
             return ModelUsage.zero();

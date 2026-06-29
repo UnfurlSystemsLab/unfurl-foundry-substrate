@@ -11,6 +11,9 @@ import java.math.BigDecimal;
  * an optional outer workflow-run budget envelope.
  */
 public final class BudgetPolicyCostGuardrail implements CostGuardrail {
+/**
+ * Implements the check helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public GuardrailDecision check(CostAccounting accounting, ExecutionContext context) {
         CostAccounting cost = accounting == null ? CostAccounting.empty(null) : accounting;
@@ -28,6 +31,9 @@ public final class BudgetPolicyCostGuardrail implements CostGuardrail {
         return GuardrailDecision.allow();
     }
 
+/**
+ * Implements the checkTokenCeilings helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private GuardrailDecision checkTokenCeilings(CostAccounting cost, BudgetPolicy policy) {
         if (policy.maxPromptTokens() != null && cost.promptTokens() >= policy.maxPromptTokens()) {
             return GuardrailDecision.deny("Prompt token budget exceeded");
@@ -41,6 +47,9 @@ public final class BudgetPolicyCostGuardrail implements CostGuardrail {
         return GuardrailDecision.allow();
     }
 
+/**
+ * Implements the effectiveUsdCeiling helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private BigDecimal effectiveUsdCeiling(BudgetPolicy policy, ExecutionContext context) {
         BigDecimal agentCeiling = policy.defaultBudgetUsd() != null ? policy.defaultBudgetUsd() : policy.maxBudgetUsd();
         BigDecimal outer = CostGuardrailContext.outerBudgetRemainingUsd(context).orElse(null);

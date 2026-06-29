@@ -24,6 +24,9 @@ public record AgentPhase(
         int maxToolIterations,
         List<String> skillRefs
 ) {
+/**
+ * Constructs AgentPhase with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public AgentPhase(
             String id,
             String promptTemplateRef,
@@ -39,6 +42,9 @@ public record AgentPhase(
                 maxToolIterations, List.of());
     }
 
+/**
+ * Constructs AgentPhase with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public AgentPhase {
         allowedToolRefs = allowedToolRefs == null ? List.of() : List.copyOf(allowedToolRefs);
         input = input == null ? Map.of() : Map.copyOf(input);

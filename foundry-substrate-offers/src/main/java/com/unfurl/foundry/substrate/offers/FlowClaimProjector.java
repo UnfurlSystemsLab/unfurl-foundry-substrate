@@ -55,6 +55,9 @@ public final class FlowClaimProjector {
         return claims;
     }
 
+/**
+ * Implements the addWorkflow helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private void addWorkflow(
             WorkflowDefinition workflow,
             Map<String, WorkflowDefinition> subWorkflowsById,
@@ -101,6 +104,9 @@ public final class FlowClaimProjector {
                 ComponentKind.INTELLIGENT_COMPONENT, List.copyOf(nodeUris)));
     }
 
+/**
+ * Factory method: creates the claim result while keeping caller-facing defaults and validation in one place.
+ */
     private Claim claim(URI uri, String label, String level, String dcpType, ComponentKind kind, List<URI> children) {
         Map<String, Object> extensions = new LinkedHashMap<>();
         extensions.put("level", level);
@@ -120,14 +126,23 @@ public final class FlowClaimProjector {
                 new ClaimMetadata("0.2.0", "1.0.0", Instant.now(), extensions));
     }
 
+/**
+ * Implements the workflowUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI workflowUri(String id) {
         return URI.create(URN_PREFIX + "workflow:" + id);
     }
 
+/**
+ * Implements the nodeUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI nodeUri(String workflowId, String nodeId) {
         return URI.create(URN_PREFIX + "node:" + workflowId + "." + nodeId);
     }
 
+/**
+ * Implements the componentUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI componentUri(String uses) {
         return URI.create(URN_PREFIX + "component:" + uses);
     }

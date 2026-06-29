@@ -14,11 +14,17 @@ import java.util.Optional;
  */
 public final class DataReferenceResolver {
 
+/**
+ * Performs the isReference operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     public boolean isReference(Object value) {
         return value instanceof String s && s.startsWith("$.");
     }
 
     /** Resolve a single reference expression; empty when the path is absent. */
+/**
+ * Performs the resolve operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     public Optional<Object> resolve(
             String expression,
             Map<String, Object> agentInput,
@@ -62,6 +68,9 @@ public final class DataReferenceResolver {
         return resolved;
     }
 
+/**
+ * Performs the resolveNested operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     private Object resolveNested(
             Object value,
             Map<String, Object> agentInput,
@@ -93,6 +102,9 @@ public final class DataReferenceResolver {
         return value;
     }
 
+/**
+ * Implements the walk helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private Optional<Object> walk(Map<String, Object> root, List<String> path) {
         Object value = root;
         for (String segment : path) {

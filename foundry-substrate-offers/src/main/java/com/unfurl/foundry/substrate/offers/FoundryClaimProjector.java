@@ -87,6 +87,9 @@ public final class FoundryClaimProjector {
         return claims;
     }
 
+/**
+ * Implements the addAgent helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private void addAgent(
             AgentDefinition agent,
             Map<String, SkillDefinition> skillsById,
@@ -109,8 +112,9 @@ public final class FoundryClaimProjector {
         ensureChildren(children, skillsById, toolsByName, claims);
     }
 
-    // Walk every referenced child URI and synthesize its claim. Skills expand into their own children;
-    // tools/prompts/models/rag are leaves. A visited guard (claims map) prevents reprocessing.
+/**
+ * Projector helper: walks referenced child URIs, expands skills into their own DCP children, and leaves tool/model/rag nodes terminal.
+ */
     private void ensureChildren(
             LinkedHashSet<URI> seed,
             Map<String, SkillDefinition> skillsById,
@@ -154,12 +158,18 @@ public final class FoundryClaimProjector {
         }
     }
 
+/**
+ * Implements the addIfPresent helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private static void addIfPresent(LinkedHashSet<URI> target, String ref, java.util.function.Function<String, URI> toUri) {
         if (ref != null && !ref.isBlank()) {
             target.add(toUri.apply(ref));
         }
     }
 
+/**
+ * Factory method: creates the claim result while keeping caller-facing defaults and validation in one place.
+ */
     private Claim claim(URI uri, String label, String level, ComponentKind kind, List<URI> children, List<Offer> offers) {
         Map<String, Object> extensions = new LinkedHashMap<>();
         extensions.put("level", level);
@@ -178,42 +188,69 @@ public final class FoundryClaimProjector {
                 new ClaimMetadata("0.2.0", "1.0.0", Instant.now(), extensions));
     }
 
+/**
+ * Factory method: creates the offersFor result while keeping caller-facing defaults and validation in one place.
+ */
     private static List<Offer> offersFor(String capability) {
         return AiOffers.standardAiOffers("1.0.0").stream()
                 .filter(offer -> offer.capability().equals(capability))
                 .toList();
     }
 
+/**
+ * Implements the agentUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI agentUri(String id) {
         return URI.create(URN_PREFIX + "agent:" + id);
     }
 
+/**
+ * Implements the skillUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI skillUri(String ref) {
         return URI.create(URN_PREFIX + "skill:" + ref);
     }
 
+/**
+ * Implements the toolUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI toolUri(String ref) {
         return URI.create(URN_PREFIX + "tool:" + ref);
     }
 
+/**
+ * Implements the promptUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI promptUri(String ref) {
         return URI.create(URN_PREFIX + "prompt:" + ref);
     }
 
+/**
+ * Implements the modelUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI modelUri(String ref) {
         return URI.create(URN_PREFIX + "model:" + ref);
     }
 
+/**
+ * Implements the ragUri helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     public URI ragUri(String ref) {
         return URI.create(URN_PREFIX + "rag:" + ref);
     }
 
+/**
+ * Implements the kindOf helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private static String kindOf(URI uri) {
         String rest = uri.toString().substring(URN_PREFIX.length());
         int sep = rest.indexOf(':');
         return sep < 0 ? rest : rest.substring(0, sep);
     }
 
+/**
+ * Implements the refOf helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     private static String refOf(URI uri) {
         String rest = uri.toString().substring(URN_PREFIX.length());
         int sep = rest.indexOf(':');

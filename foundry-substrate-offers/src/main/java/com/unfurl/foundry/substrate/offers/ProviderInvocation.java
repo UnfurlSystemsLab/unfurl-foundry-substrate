@@ -14,12 +14,19 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Exposes the {@code provider.call} capability over a frozen DCP contract. */
+/**
+ * class for the Foundry AI substrate surface; documents the ProviderInvocation contract used by DCP ports, adapters, or domain code.
+ * Inputs and outputs remain defined by the declared fields and methods, with validation kept inside this type where present.
+ */
 public final class ProviderInvocation implements ContractInvocable {
     private final String contractId;
     private final String contractVersion;
     private final String modelRef;
     private final ModelProvider provider;
 
+/**
+ * Constructs ProviderInvocation with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ */
     public ProviderInvocation(String contractId, String contractVersion, String modelRef, ModelProvider provider) {
         this.contractId = contractId;
         this.contractVersion = contractVersion;
@@ -27,16 +34,25 @@ public final class ProviderInvocation implements ContractInvocable {
         this.provider = provider;
     }
 
+/**
+ * Implements the contractId helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public String contractId() {
         return contractId;
     }
 
+/**
+ * Implements the contractVersion helper for this component, preserving the surrounding input, output, and edge-case contract.
+ */
     @Override
     public String contractVersion() {
         return contractVersion;
     }
 
+/**
+ * Performs the invoke operation for this component, translating validated inputs into the domain result expected by callers.
+ */
     @Override
     public ContractInvocationResult invoke(ContractInvocation invocation, ExecutionContext context) {
         String prompt = String.valueOf(invocation.input().getOrDefault("prompt", ""));
