@@ -28,6 +28,8 @@ claim:
       stability: EVOLVING
       version: 0.1.0
       metered: false
+  faults:
+    emitted: []
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

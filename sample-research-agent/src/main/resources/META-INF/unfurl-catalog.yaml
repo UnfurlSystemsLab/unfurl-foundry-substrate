@@ -40,6 +40,27 @@ claim:
     limitations:
       - Retrieval-grounded only; no tool use or workflow orchestration.
       - Corpus and embedding model are host-supplied via the RAG substrate.
+  faults:
+    emitted:
+      - code: agent.research.degraded
+        category: DEPENDENCY
+        severity: DEGRADED
+        description: Research agent could not retrieve or synthesize the expected grounded answer.
+        affects:
+          needs:
+            - agent.execute@v1
+            - rag.search@v1
+          offers:
+            - agent.research
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR, METRIC_THRESHOLD]
+        propagation:
+          parent_impact: DEGRADED
+          propagates_when: parent composition depends on grounded research output
+          suppresses_when: caller accepts ungrounded summary output
+        remediation:
+          allowed_actions: [retry_agent, repair_rag_binding, adjust_research_scope]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

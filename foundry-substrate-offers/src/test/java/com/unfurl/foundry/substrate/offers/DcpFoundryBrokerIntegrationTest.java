@@ -77,17 +77,19 @@ class DcpFoundryBrokerIntegrationTest {
     }
 
     private Claim providerClaim() {
+        Offer toolOffer = new Offer(AiOffers.TOOL_CALL, "Call a tool", ConsumerAccess.ANY,
+                new OfferInterface(InterfaceKind.IN_PROCESS, Map.of("operation", "execute")),
+                Stability.STABLE, "1.0.0", false, null);
         return new Claim(
                 new Identity(URI.create("urn:provider"), "Provider", ComponentKind.COMPONENT, "1.0.0", "Unfurl", URI.create("urn:publisher")),
                 new DomainAssertion("provider", List.of(new Concern("tools", "tool execution", null, List.of(), List.of())), List.of("no silent ownership changes")),
                 List.of(new Refusal("billing", "billing belongs elsewhere", "urn:billing")),
                 new Dependencies(List.of()),
-                List.of(new Offer(AiOffers.TOOL_CALL, "Call a tool", ConsumerAccess.ANY,
-                        new OfferInterface(InterfaceKind.IN_PROCESS, Map.of("operation", "execute")),
-                        Stability.STABLE, "1.0.0", false, null)),
+                List.of(toolOffer),
                 new ConflictResolution(List.of(), List.of(), false),
                 null,
                 new IntegrationPorts(Map.of()),
+                AiOffers.faultPolicyFor(List.of(toolOffer)),
                 new ClaimMetadata("0.2.0", "1.0.0", Instant.EPOCH, Map.of()));
     }
 

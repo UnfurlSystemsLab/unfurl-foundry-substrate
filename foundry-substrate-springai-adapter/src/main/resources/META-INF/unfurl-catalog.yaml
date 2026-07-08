@@ -49,6 +49,59 @@ claim:
       stability: EVOLVING
       version: 0.1.0
       metered: false
+  faults:
+    emitted:
+      - code: springai.model-provider.failed
+        category: DEPENDENCY
+        severity: BLOCKING
+        description: Spring AI model provider failed or became unavailable.
+        affects:
+          needs: []
+          offers:
+            - springai.model-provider
+          constraints: []
+        evidence:
+          signals: [HEALTH, INVOCATION_ERROR, METRIC_THRESHOLD]
+        propagation:
+          parent_impact: BLOCKED
+          propagates_when: parent agent depends on model completion
+          suppresses_when: alternate model provider binding is active
+        remediation:
+          allowed_actions: [retry_provider_call, switch_provider, repair_provider_binding]
+      - code: springai.embedding-provider.failed
+        category: DEPENDENCY
+        severity: DEGRADED
+        description: Spring AI embedding provider failed for embedding generation.
+        affects:
+          needs: []
+          offers:
+            - springai.embedding-provider
+          constraints: []
+        evidence:
+          signals: [HEALTH, INVOCATION_ERROR]
+        propagation:
+          parent_impact: DEGRADED
+          propagates_when: parent retrieval path depends on embedding generation
+          suppresses_when: retrieval can use precomputed vectors
+        remediation:
+          allowed_actions: [retry_embedding, switch_embedding_provider]
+      - code: springai.vector-store.failed
+        category: DEPENDENCY
+        severity: DEGRADED
+        description: Spring AI vector store access failed for retrieval.
+        affects:
+          needs: []
+          offers:
+            - springai.vector-store
+          constraints: []
+        evidence:
+          signals: [HEALTH, INVOCATION_ERROR]
+        propagation:
+          parent_impact: DEGRADED
+          propagates_when: parent retrieval path depends on vector-store access
+          suppresses_when: retrieval is optional or alternate store is active
+        remediation:
+          allowed_actions: [repair_vector_store_binding, switch_vector_store]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

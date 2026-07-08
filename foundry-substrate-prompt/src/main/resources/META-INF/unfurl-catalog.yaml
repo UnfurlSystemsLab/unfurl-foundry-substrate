@@ -34,6 +34,26 @@ claim:
       stability: STABLE
       version: 0.1.0
       metered: false
+  faults:
+    emitted:
+      - code: prompt.compose.failed
+        category: CAPABILITY
+        severity: DEGRADED
+        description: Prompt composition or template expansion failed for an agent phase.
+        affects:
+          needs: []
+          offers:
+            - prompt.compose
+            - prompt.template
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR]
+        propagation:
+          parent_impact: DEGRADED
+          propagates_when: parent agent depends on composed prompt content
+          suppresses_when: caller supplies a fully rendered prompt
+        remediation:
+          allowed_actions: [repair_prompt_template, provide_rendered_prompt]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

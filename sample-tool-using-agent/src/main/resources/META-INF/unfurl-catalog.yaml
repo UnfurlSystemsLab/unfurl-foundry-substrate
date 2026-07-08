@@ -40,6 +40,27 @@ claim:
     limitations:
       - Tool-augmented only; no retrieval or workflow orchestration.
       - Tool implementations are host-registered; the agent implements none itself.
+  faults:
+    emitted:
+      - code: agent.tool-using.failed
+        category: DEPENDENCY
+        severity: BLOCKING
+        description: Tool-using agent failed because agent execution or required tool invocation failed.
+        affects:
+          needs:
+            - agent.execute@v1
+            - tool.invoke@v1
+          offers:
+            - agent.tool-using
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR, POLICY_DENIAL]
+        propagation:
+          parent_impact: BLOCKED
+          propagates_when: parent composition depends on tool-backed agent output
+          suppresses_when: alternate non-tool agent path is acceptable
+        remediation:
+          allowed_actions: [retry_agent, repair_tool_binding, request_operator_approval]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

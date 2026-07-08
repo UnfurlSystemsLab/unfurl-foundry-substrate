@@ -101,6 +101,8 @@ The reason this layer exists in its particular shape is to support **adding AI c
 
 An AI component publishes a DCP **claim** whose `offers` are its capabilities: an agent component offers `agent.run`, a retrieval component offers `rag.search`, a tool component offers `tool.call`, a model gateway offers `provider.call`. `unfurl-foundry-substrate` provides these **offer fragments** — the DCP-shaped declarations of what each AI capability exposes (operation names, input/output shape references, cost implications). The claim schema itself is owned by `unfurl-dcp`; this layer only fills in the AI-specific fragments.
 
+Those AI claims also declare DCP fault vocabulary for the AI capabilities they expose. A provider, tool, RAG, skill, or agent fault is not modeled as a substrate-specific type here; it is expressed through the DCP claim `faults` section and evaluated by `unfurl-dcp`'s deterministic propagation gate. Metadata-only or passive library components still declare an explicit empty fault policy so catalog consumers can distinguish "no declared faults" from "fault section missing."
+
 ### Plane 2 — Negotiation (design-time, fabric)
 
 When a component is being composed into a host, **`unfurl-fabric` negotiates** — at authoring/design time — whether the host accepts the component, partially accepts it, or refuses it (with a redirection saying what kind of component *should* own the refused concern). All accept/reject *reasoning* happens here, and the result is **frozen into a composition contract**. This plane is intelligent; it runs in the authoring environment, never in the customer's perimeter. It is shown here for context only — it is out of scope for `unfurl-foundry-substrate`.

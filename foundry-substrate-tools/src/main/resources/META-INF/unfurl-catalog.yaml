@@ -35,6 +35,42 @@ claim:
       stability: STABLE
       version: 0.1.0
       metered: false
+  faults:
+    emitted:
+      - code: tool.invoke.failed
+        category: CAPABILITY
+        severity: DEGRADED
+        description: Tool invocation failed or returned a governed failure result.
+        affects:
+          needs: []
+          offers:
+            - tool.invoke
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR, POLICY_DENIAL]
+        propagation:
+          parent_impact: DEGRADED
+          propagates_when: parent agent depends on tool invocation output
+          suppresses_when: tool is optional or alternate tool path is available
+        remediation:
+          allowed_actions: [retry_tool, repair_tool_binding, request_operator_approval]
+      - code: tool.register.failed
+        category: CAPABILITY
+        severity: BLOCKING
+        description: Tool registration failed, leaving a declared tool unavailable to agents.
+        affects:
+          needs: []
+          offers:
+            - tool.register
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR, POLICY_DENIAL]
+        propagation:
+          parent_impact: BLOCKED
+          propagates_when: parent composition requires the registered tool
+          suppresses_when: no parent claim requires this tool
+        remediation:
+          allowed_actions: [repair_tool_manifest, retry_registration]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

@@ -39,6 +39,26 @@ claim:
     limitations:
       - Single conversational surface; no retrieval or tool use.
       - The chat model is host-supplied via the engine; the agent selects no provider.
+  faults:
+    emitted:
+      - code: agent.chatbot.failed
+        category: RUNTIME
+        severity: BLOCKING
+        description: Chatbot agent could not produce a conversational response.
+        affects:
+          needs:
+            - agent.execute@v1
+          offers:
+            - agent.chatbot
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR, METRIC_THRESHOLD]
+        propagation:
+          parent_impact: BLOCKED
+          propagates_when: parent composition depends on chatbot response
+          suppresses_when: alternate chat agent is bound
+        remediation:
+          allowed_actions: [retry_agent, repair_agent_execute_binding]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

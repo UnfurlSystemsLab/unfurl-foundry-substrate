@@ -57,6 +57,42 @@ claim:
     limitations:
       - No corpus or index is shipped in the JAR; both are host-bound.
       - No network egress unless an embedding provider is configured.
+  faults:
+    emitted:
+      - code: rag.search.degraded
+        category: DEPENDENCY
+        severity: DEGRADED
+        description: Retrieval could not return the grounded context requested by the agent.
+        affects:
+          needs: []
+          offers:
+            - rag.search
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR, METRIC_THRESHOLD]
+        propagation:
+          parent_impact: DEGRADED
+          propagates_when: parent composition depends on retrieved grounding
+          suppresses_when: retrieval is optional for the parent agent phase
+        remediation:
+          allowed_actions: [retry_retrieval, switch_collection, repair_vector_store]
+      - code: rag.embed.failed
+        category: DEPENDENCY
+        severity: BLOCKING
+        description: Embedding generation failed for a retrieval or indexing path.
+        affects:
+          needs: []
+          offers:
+            - rag.embed
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR, HEALTH]
+        propagation:
+          parent_impact: BLOCKED
+          propagates_when: parent composition requires embeddings to satisfy retrieval
+          suppresses_when: precomputed embeddings satisfy the request
+        remediation:
+          allowed_actions: [retry_embedding, repair_embedding_provider, use_precomputed_vectors]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

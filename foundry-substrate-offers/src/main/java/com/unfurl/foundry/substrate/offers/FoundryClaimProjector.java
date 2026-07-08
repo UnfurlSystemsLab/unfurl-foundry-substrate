@@ -185,6 +185,7 @@ public final class FoundryClaimProjector {
                 null,
                 null,
                 new IntegrationPorts(Map.of()),
+                AiOffers.faultPolicyFor(offers),
                 new ClaimMetadata("0.2.0", "1.0.0", Instant.now(), extensions));
     }
 

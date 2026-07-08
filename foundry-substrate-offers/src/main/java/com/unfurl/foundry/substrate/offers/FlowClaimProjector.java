@@ -123,6 +123,7 @@ public final class FlowClaimProjector {
                 null,
                 null,
                 new IntegrationPorts(Map.of()),
+                AiOffers.faultPolicyFor(List.of()),
                 new ClaimMetadata("0.2.0", "1.0.0", Instant.now(), extensions));
     }
 

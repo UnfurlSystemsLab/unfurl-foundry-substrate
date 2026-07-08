@@ -45,6 +45,26 @@ claim:
     limitations:
       - The engine requires a host-supplied chat client; it selects no LLM provider itself.
       - Substrate plugins are composed from the agent's declared needs, not from runtime configuration.
+  faults:
+    emitted:
+      - code: agent.execute.failed
+        category: RUNTIME
+        severity: BLOCKING
+        description: Agent execution failed before producing a governed result.
+        affects:
+          needs:
+            - spring-ai.chat-client@v1?owner=host
+          offers:
+            - agent.execute
+          constraints: []
+        evidence:
+          signals: [INVOCATION_ERROR, METRIC_THRESHOLD]
+        propagation:
+          parent_impact: BLOCKED
+          propagates_when: parent composition depends on agent.execute output
+          suppresses_when: alternate agent runtime is available
+        remediation:
+          allowed_actions: [retry_agent, repair_chat_client_binding, inspect_agent_state]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

@@ -341,6 +341,7 @@ Result types are immutable records or sealed interfaces. Do not throw for expect
 Offer fragments and AI invocables live in `com.unfurl.foundry.substrate.offers` and constitute the only place `unfurl-dcp` is imported.
 
 - **Offer fragments** are DCP claim shapes (from `unfurl-dcp`) describing each AI capability a component exposes: operation name (`agent.run`, `tool.call`, `rag.search`, `provider.call`), input/output shape references, and cost-implication metadata. A component publishes these as part of its claim; fabric negotiates them; the broker registers the accepted ones.
+- **Fault fragments** are the matching DCP `FaultPolicy` declarations for those offers. `foundry-substrate-offers` supplies canonical fault policies for `agent.run`, `skill.invoke`, `tool.call`, `rag.search`, and `provider.call`; passive catalog entries must still publish `faults.emitted: []`.
 - **AI invocables** implement the substrate `ContractInvocable`:
 
 ```java
