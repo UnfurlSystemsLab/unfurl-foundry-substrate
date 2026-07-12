@@ -170,10 +170,11 @@ foundry-substrate-offers
     com.unfurl.foundry.substrate.offers
   contains:
     AI capability offer fragments (DCP claim shapes for agent.run/tool.call/rag.search/provider.call),
-    AgentInvocation/ToolInvocation as ContractInvocable implementations
+    AgentInvocation/ToolInvocation as ContractInvocable implementations,
+    FlowClaimProjector and FoundryClaimProjector for recursive Dynamic DCP inspection claims
   may depend on:
     foundry-substrate-domain, upstream substrate-domain flow definitions for projection, unfurl-dcp,
-    substrate-composition-api
+    substrate-composition-api, Jackson databind/YAML/JSR310 for projection request generation
 
 foundry-substrate-engine
   package:
@@ -342,6 +343,7 @@ Offer fragments and AI invocables live in `com.unfurl.foundry.substrate.offers` 
 
 - **Offer fragments** are DCP claim shapes (from `unfurl-dcp`) describing each AI capability a component exposes: operation name (`agent.run`, `tool.call`, `rag.search`, `provider.call`), input/output shape references, and cost-implication metadata. A component publishes these as part of its claim; fabric negotiates them; the broker registers the accepted ones.
 - **Fault fragments** are the matching DCP `FaultPolicy` declarations for those offers. `foundry-substrate-offers` supplies canonical fault policies for `agent.run`, `skill.invoke`, `tool.call`, `rag.search`, and `provider.call`; passive catalog entries must still publish `faults.emitted: []`.
+- **Provider adapter claims** expose the neutral ports they implement. For example, a Spring AI adapter offers `model-provider`, `embedding-provider`, and `vector-store`; `spring-ai.*` bean names remain host-owned runtime leaf dependencies or metadata, never the capabilities consumed by Foundry, RAG, or Flowfoundry closure.
 - **AI invocables** implement the substrate `ContractInvocable`:
 
 ```java
@@ -364,6 +366,16 @@ For hosts that register AI capability directly into the substrate `CapabilityReg
 - `ModelProviderNodeExecutor` for `provider.call`
 
 These are the flow-facing bridge: flow can resolve a normal substrate node executor while the implementation delegates to `AgentRuntime`, `ToolExecutor`, `RagRetriever`, or `ModelProvider` behind the port boundary.
+
+### Recursive Projection Bridge
+
+`foundry-substrate-offers` also provides the no-I/O recursive projection bridge for Studio inspection:
+
+- `FoundryClaimProjector` maps `AgentDefinition` to structural DCP claims. Agent claims contain explicit `PHASE` claims; phase claims contain prompt, model, RAG, tool, and skill refs. Skill claims expand into their own prompt/model/RAG/tool refs.
+- `FlowClaimProjector` maps `WorkflowDefinition` to structural DCP claims. Workflow claims contain node claims; nodes contain their `uses` target or a sub-workflow. `uses: agent:<id>` bridges to `urn:unfurl:foundry:agent:<id>`.
+- `RecursiveProjectionRequestCli` is a bridge utility that reads workflow and agent YAML, merges the Flow and Foundry claim maps under an aggregate root claim, and writes the JSON body accepted by Fabric's `dynamic-dcp/project` route.
+
+These projection claims are not runtime claims and do not replace catalog admission, DCP negotiation, or compile validation. They exist so design-time tools can inspect the actual workflow/agent topology without making Fabric depend on Flow or Foundry domain classes.
 
 ### Events
 
@@ -409,8 +421,12 @@ Start flow:
    - Check `CostGuardrail`; the runner attaches the resolved `AgentDefinition.budgetPolicy` to `ExecutionContext` before the check. On a tripped budget, emit `GUARDRAIL_TRIPPED` and fail the phase.
    - Call `ModelProvider.complete`, emit `MODEL_INVOKED` and `TOKENS_CONSUMED`, update `CostAccounting` with prompt/completion tokens, provider/model attribution, and `ModelResponse.estimatedCostUsd` (with legacy metadata fallback).
    - While the response contains tool calls and `maxToolIterations` is not exceeded: check `PermissionBridge`, resolve the tool via `ToolRegistry`, execute, emit `TOOL_CALLED`/`TOOL_COMPLETED`, append the tool result message, and call the model again.
-   - On success, store the phase output, mark `COMPLETED`, persist, emit `PHASE_COMPLETED`.
-   - Evaluate conditional edges; mark non-matching branch phases `SKIPPED`; continue scanning pending phases in deterministic order.
+   - On success, build structured phase output, mark `COMPLETED`, persist, emit `PHASE_COMPLETED`.
+     The raw assistant content is always available as `output.content`. When the content is a JSON object, the
+     runner exposes it as `output.json` and makes top-level fields available to `AgentPhase.outputMapping`. A phase
+     with `outputMapping` resolves mappings against `$.output.content`, `$.output.json`, `$.output.<field>`, and
+     `$.tools.<callId>.output`; unresolved mappings fail the phase with `OUTPUT_MAPPING_UNRESOLVED`.
+   - Evaluate conditional edges; mark non-matching branch phases `SKIPPED`; continue scanning pending phases in deterministic order. Conditions may use truthiness on a resolved reference or the small scalar equality subset `<reference> == '<literal>'` / `<reference> != '<literal>'`, which is sufficient for governed phase routing such as `kind == 'continue'`.
    - On failure, mark phase and run `FAILED`, persist, emit failure events, and stop.
 6. If all reachable phases are `COMPLETED` or `SKIPPED`, mark the run `COMPLETED`, persist, emit `AGENT_COMPLETED`.
 

@@ -6,44 +6,41 @@ claim:
     version: 0.1.0
     publisher: Unfurl
   domain:
-    summary: Spring AI adapter for the Foundry substrate — implements ModelProvider, EmbeddingProvider, and VectorStore by wrapping host-supplied Spring AI beans.
+    summary: Spring AI adapter for the Foundry substrate; implements the neutral ModelProvider, EmbeddingProvider, and VectorStore ports by wrapping host-supplied Spring AI beans.
     concerns:
-      - concern: springai.model-provider
-        description: Routes foundry ModelProvider calls through a Spring AI ChatModel bean.
-      - concern: springai.embedding-provider
-        description: Routes foundry EmbeddingProvider calls through a Spring AI EmbeddingModel bean.
-      - concern: springai.vector-store
-        description: Routes foundry VectorStore upsert/query through a Spring AI VectorStore bean.
+      - concern: model-provider
+        description: Routes Foundry ModelProvider calls through a Spring AI ChatModel bean.
+      - concern: embedding-provider
+        description: Routes Foundry EmbeddingProvider calls through a Spring AI EmbeddingModel bean.
+      - concern: vector-store
+        description: Routes Foundry VectorStore upsert/query through a Spring AI VectorStore bean.
     boundary_principles:
-      - "Provider-agnostic by construction: the customer picks the Spring AI provider (OpenAI, Anthropic, Azure, Ollama, Bedrock, ...) by wiring their preferred starter; this adapter speaks foundry's neutral port interfaces."
+      - "Provider-agnostic by construction: the customer picks the Spring AI provider by wiring their preferred starter; this adapter speaks Foundry's neutral port interfaces."
       - "No design-time secrets: API keys, deployment ids, and vector-store credentials travel via the host's Spring context, never via Fabric design-time state."
-      - "Plug-in, not replacement: foundry substrates that take foundry's ModelProvider / EmbeddingProvider / VectorStore ports work unchanged when this adapter is the implementation."
+      - "Plug-in, not replacement: Foundry substrates that take Foundry's ModelProvider, EmbeddingProvider, or VectorStore ports work unchanged when this adapter is the implementation."
   refusals:
     - concern: ai.provider.implementation
-      rationale: This adapter wraps Spring AI, which is itself the source of provider-specific wire formats; the adapter never speaks Anthropic / OpenAI / Azure / Ollama formats directly.
+      rationale: This adapter wraps Spring AI, which is itself the source of provider-specific wire formats; the adapter never speaks Anthropic, OpenAI, Azure, or Ollama formats directly.
       owned_by: urn:spring:ai
   dependencies:
     needs:
-      # Host-supplied Spring AI beans. Each is owner=host because the
-      # customer's Spring context governs which provider/backend is
-      # actually wired; fabric composition does not select among them.
       - "spring-ai.chat-client@v1?owner=host"
       - "spring-ai.embedding-client@v1?owner=host"
       - "spring-ai.vector-store@v1?owner=host"
   offers:
-    - capability: springai.model-provider
+    - capability: model-provider
       description: Foundry ModelProvider implementation backed by Spring AI ChatModel.
       consumer_access: NAMED_COMPONENTS_ONLY
       stability: EVOLVING
       version: 0.1.0
       metered: false
-    - capability: springai.embedding-provider
+    - capability: embedding-provider
       description: Foundry EmbeddingProvider implementation backed by Spring AI EmbeddingModel.
       consumer_access: NAMED_COMPONENTS_ONLY
       stability: EVOLVING
       version: 0.1.0
       metered: false
-    - capability: springai.vector-store
+    - capability: vector-store
       description: Foundry VectorStore implementation backed by Spring AI VectorStore.
       consumer_access: NAMED_COMPONENTS_ONLY
       stability: EVOLVING
@@ -58,7 +55,7 @@ claim:
         affects:
           needs: []
           offers:
-            - springai.model-provider
+            - model-provider
           constraints: []
         evidence:
           signals: [HEALTH, INVOCATION_ERROR, METRIC_THRESHOLD]
@@ -75,7 +72,7 @@ claim:
         affects:
           needs: []
           offers:
-            - springai.embedding-provider
+            - embedding-provider
           constraints: []
         evidence:
           signals: [HEALTH, INVOCATION_ERROR]
@@ -92,7 +89,7 @@ claim:
         affects:
           needs: []
           offers:
-            - springai.vector-store
+            - vector-store
           constraints: []
         evidence:
           signals: [HEALTH, INVOCATION_ERROR]
@@ -106,6 +103,12 @@ claim:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"
     created_at: "1970-01-01T00:00:00Z"
+    extensions:
+      implementation_framework: spring-ai
+      implements_capabilities:
+        model-provider: spring-ai.chat-client
+        embedding-provider: spring-ai.embedding-client
+        vector-store: spring-ai.vector-store
 catalog:
   lifecycle:
     status: ACTIVE

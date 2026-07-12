@@ -12,11 +12,11 @@ claim:
         description: Answer questions by retrieving relevant passages from a vector corpus and grounding the chat reply in them.
     boundary_principles:
       - "Plug-and-play retrieval: pulls in foundry-substrate-rag through the rag.search@v1 need; tools and flow substrates are excluded by absence-of-need."
-      - "The corpus and embedding model are host-owned (rag's own ?owner=host needs), so the customer's Spring AI context governs provider selection."
+      - "The corpus is host-owned, while RAG's vector-store and embedding-provider needs are satisfied by provider adapter claims or runtime profile bindings."
   refusals:
     - concern: rag.corpus-backend
-      rationale: The research agent does not own the vector store or embedding provider; retrieval is delegated to foundry-substrate-rag over host-supplied beans.
-      owned_by: urn:host
+      rationale: The research agent does not own the corpus, vector store, or embedding provider; retrieval is delegated to foundry-substrate-rag and provider adapter claims.
+      owned_by: urn:unfurl:foundry:provider-adapter
   dependencies:
     needs:
       - "agent.execute@v1"
@@ -39,7 +39,7 @@ claim:
       - claim.dependencies
     limitations:
       - Retrieval-grounded only; no tool use or workflow orchestration.
-      - Corpus and embedding model are host-supplied via the RAG substrate.
+      - Corpus data is host-supplied; vector and embedding implementations are bound through the RAG substrate's neutral provider needs.
   faults:
     emitted:
       - code: agent.research.degraded

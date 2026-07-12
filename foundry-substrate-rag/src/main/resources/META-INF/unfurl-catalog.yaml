@@ -13,23 +13,18 @@ claim:
       - concern: rag.embed
         description: Embed query and document text for retrieval.
     boundary_principles:
-      - In-process library; no network egress unless an embedding provider is configured.
+      - In-process library; no network egress unless provider bindings are configured.
       - Corpus configuration is host-bound; no design-time index is shipped in the JAR.
+      - Vector and embedding dependencies are neutral DCP ports that may be satisfied by any provider adapter.
   refusals:
     - concern: rag.corpus-backend
-      rationale: RAG does not own the vector store or embedding provider; those are host-supplied Spring AI beans selected at deployment time.
-      owned_by: urn:host
+      rationale: RAG does not own the corpus, vector store, or embedding provider; those are supplied by host bindings or provider adapter claims selected at deployment time.
+      owned_by: urn:unfurl:foundry:provider-adapter
   dependencies:
     needs:
-      # Both deps are host-owned. The corpus is the customer's vector
-      # store backend (Chroma / PGVector / Pinecone / etc.) wired
-      # through Spring AI's VectorStore abstraction. The embedding
-      # client is the customer-configured Spring AI EmbeddingClient bean
-      # — provider selection (OpenAI / Azure / Ollama) is a deployment
-      # decision, not a fabric-composition decision, so both stay on
-      # the host side of the perimeter.
       - "rag.corpus@v1?owner=host"
-      - "spring-ai.embedding-client@v1?owner=host"
+      - "vector-store@v1?transport=profile-binding&shape=com.unfurl.foundry.substrate.ports.VectorStore"
+      - "embedding-provider@v1?transport=profile-binding&shape=com.unfurl.foundry.substrate.ports.EmbeddingProvider"
   offers:
     - capability: rag.search
       description: Retrieve passages relevant to a query from a configured corpus.
@@ -48,15 +43,15 @@ claim:
     protocols_supported: [IN_PROCESS]
     supported_intents:
       - intent: bind-corpus
-        description: Confirm the host-supplied vector store backend used for retrieval.
-      - intent: bind-embedding-client
-        description: Confirm the host-supplied Spring AI embedding client.
+        description: Confirm the host-supplied corpus and vector store backend used for retrieval.
+      - intent: bind-embedding-provider
+        description: Confirm the embedding provider binding used for retrieval and indexing paths.
     answer_grounding:
       - claim.offers
       - claim.dependencies
     limitations:
-      - No corpus or index is shipped in the JAR; both are host-bound.
-      - No network egress unless an embedding provider is configured.
+      - No corpus or index is shipped in the JAR; corpus data is host-bound.
+      - No network egress unless a vector store or embedding provider binding is configured.
   faults:
     emitted:
       - code: rag.search.degraded
@@ -81,7 +76,8 @@ claim:
         severity: BLOCKING
         description: Embedding generation failed for a retrieval or indexing path.
         affects:
-          needs: []
+          needs:
+            - embedding-provider@v1?transport=profile-binding&shape=com.unfurl.foundry.substrate.ports.EmbeddingProvider
           offers:
             - rag.embed
           constraints: []

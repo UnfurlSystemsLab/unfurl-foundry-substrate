@@ -12,11 +12,11 @@ claim:
         description: Single-turn or multi-turn conversational agent; no retrieval, no tool use.
     boundary_principles:
       - "Plug-and-play minimum: declares agent.execute as its only dependency; the resolver pulls in foundry-substrate-engine and nothing else."
-      - "Provider-agnostic: the chat model is supplied by the host's Spring AI ChatClient bean via the engine's spring-ai.chat-client need."
+      - "Provider-agnostic: the chat model is supplied through the engine's neutral model-provider need."
   refusals:
     - concern: ai.provider.selection
-      rationale: The chatbot does not select or configure an LLM provider; the chat model arrives as a host-supplied Spring AI bean through the engine.
-      owned_by: urn:host
+      rationale: The chatbot does not select or configure an LLM provider; the model arrives through a ModelProvider adapter or runtime binding.
+      owned_by: urn:unfurl:foundry:provider-adapter
   dependencies:
     needs:
       - "agent.execute@v1"

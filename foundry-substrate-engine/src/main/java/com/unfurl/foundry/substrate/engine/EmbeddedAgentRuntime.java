@@ -1,5 +1,8 @@
 package com.unfurl.foundry.substrate.engine;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unfurl.foundry.substrate.agent.AgentDefinition;
 import com.unfurl.foundry.substrate.agent.AgentDefinitionValidator;
 import com.unfurl.foundry.substrate.agent.AgentPhase;
@@ -46,6 +49,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -58,6 +62,10 @@ import java.util.UUID;
  * conditional inbound edges route phases to RUN or SKIPPED.
  */
 public final class EmbeddedAgentRuntime implements AgentRuntime {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
+    };
+
     private final ProviderRegistry providerRegistry;
     private final ToolRegistry toolRegistry;
     private final RagRetriever ragRetriever;
@@ -290,9 +298,133 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         }
 
         String content = response.message() == null ? "" : response.message().content();
-        Map<String, Object> output = Map.of("content", content == null ? "" : content);
+        PhaseOutput output = buildPhaseOutput(phase, content == null ? "" : content, toolCalls);
+        if (!output.success()) {
+            return failedPhase(phase.id(), resolvedInput, messages, output.errorCode(), output.errorMessage(), started);
+        }
         return new AgentPhaseState(phase.id(), AgentPhaseStatus.COMPLETED, resolvedInput, List.copyOf(messages),
-                List.copyOf(toolCalls), output, null, null, started, Instant.now());
+                List.copyOf(toolCalls), output.values(), null, null, started, Instant.now());
+    }
+
+/**
+ * Builder: turns raw model content and tool results into the structured phase output consumed by downstream phases.
+ */
+    @SuppressWarnings("unchecked")
+    private PhaseOutput buildPhaseOutput(AgentPhase phase, String content, List<ToolCall> toolCalls) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("content", content);
+
+        parseJsonObject(content).ifPresent(parsed -> {
+            output.put("json", parsed);
+            parsed.forEach((key, value) -> {
+                if (!"content".equals(key) && !"json".equals(key)) {
+                    output.putIfAbsent(key, value);
+                }
+            });
+        });
+
+        if (phase.outputMapping().isEmpty()) {
+            return PhaseOutput.success(output);
+        }
+
+        Map<String, Object> mappingScope = Map.of(
+                "output", output,
+                "tools", toolOutputs(toolCalls));
+        for (Map.Entry<String, Object> entry : phase.outputMapping().entrySet()) {
+            MappingResolution resolution = resolveMapping(entry.getValue(), mappingScope);
+            if (!resolution.resolved()) {
+                return PhaseOutput.failure("OUTPUT_MAPPING_UNRESOLVED",
+                        "Could not resolve outputMapping." + entry.getKey() + " from " + entry.getValue());
+            }
+            if (!"content".equals(entry.getKey())) {
+                output.put(entry.getKey(), resolution.value());
+            }
+        }
+        return PhaseOutput.success(output);
+    }
+
+/**
+ * Adapter: exposes tool-call results under stable mapping paths such as {@code $.tools.<callId>.output}.
+ */
+    private Map<String, Object> toolOutputs(List<ToolCall> toolCalls) {
+        Map<String, Object> tools = new LinkedHashMap<>();
+        for (ToolCall call : toolCalls) {
+            tools.put(call.callId(), Map.of(
+                    "toolName", call.toolName() == null ? "" : call.toolName(),
+                    "arguments", call.arguments(),
+                    "output", call.result(),
+                    "errorCode", call.errorCode() == null ? "" : call.errorCode(),
+                    "errorMessage", call.errorMessage() == null ? "" : call.errorMessage()));
+        }
+        return tools;
+    }
+
+/**
+ * Strategy: resolves nested outputMapping values against the phase-local mapping scope.
+ */
+    private MappingResolution resolveMapping(Object value, Map<String, Object> scope) {
+        if (value instanceof String expression && expression.startsWith("$.")) {
+            return resolvePath(expression, scope)
+                    .map(MappingResolution::success)
+                    .orElseGet(MappingResolution::unresolved);
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> resolved = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                MappingResolution next = resolveMapping(entry.getValue(), scope);
+                if (!next.resolved()) {
+                    return MappingResolution.unresolved();
+                }
+                resolved.put(String.valueOf(entry.getKey()), next.value());
+            }
+            return MappingResolution.success(Map.copyOf(resolved));
+        }
+        if (value instanceof List<?> list) {
+            List<Object> resolved = new ArrayList<>();
+            for (Object item : list) {
+                MappingResolution next = resolveMapping(item, scope);
+                if (!next.resolved()) {
+                    return MappingResolution.unresolved();
+                }
+                resolved.add(next.value());
+            }
+            return MappingResolution.success(List.copyOf(resolved));
+        }
+        return MappingResolution.success(value);
+    }
+
+/**
+ * Performs a simple object-path walk for phase-local mapping expressions.
+ */
+    private java.util.Optional<Object> resolvePath(String expression, Map<String, Object> scope) {
+        Object value = scope;
+        for (String segment : expression.substring(2).split("\\.")) {
+            if (value instanceof Map<?, ?> map && map.containsKey(segment)) {
+                value = map.get(segment);
+            } else {
+                return java.util.Optional.empty();
+            }
+        }
+        return java.util.Optional.ofNullable(value);
+    }
+
+/**
+ * Parser: extracts a JSON object from model output without making free-form output invalid by default.
+ */
+    private java.util.Optional<Map<String, Object>> parseJsonObject(String content) {
+        if (content == null || content.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        int start = content.indexOf('{');
+        int end = content.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(MAPPER.readValue(content.substring(start, end + 1), MAP_TYPE));
+        } catch (JsonProcessingException ex) {
+            return java.util.Optional.empty();
+        }
     }
 
 /**
@@ -413,7 +545,15 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         if (when == null || when.expression() == null) {
             return true;
         }
-        Object value = resolver.resolve(when.expression(), state.agentInput, phaseOutputs(state)).orElse(null);
+        String expression = when.expression().trim();
+        Comparison comparison = parseComparison(expression);
+        if (comparison != null) {
+            Object left = resolveConditionOperand(comparison.left(), state);
+            Object right = resolveConditionOperand(comparison.right(), state);
+            boolean matches = Objects.equals(normalizeComparable(left), normalizeComparable(right));
+            return comparison.negated() ? !matches : matches;
+        }
+        Object value = resolver.resolve(expression, state.agentInput, phaseOutputs(state)).orElse(null);
         if (value instanceof Boolean b) {
             return b;
         }
@@ -431,6 +571,49 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             return !c.isEmpty();
         }
         return value != null;
+    }
+
+/**
+ * Parser: recognizes the intentionally small equality subset used by agent DAG routing.
+ */
+    private Comparison parseComparison(String expression) {
+        int equals = expression.indexOf("==");
+        if (equals >= 0) {
+            return new Comparison(expression.substring(0, equals), expression.substring(equals + 2), false);
+        }
+        int notEquals = expression.indexOf("!=");
+        if (notEquals >= 0) {
+            return new Comparison(expression.substring(0, notEquals), expression.substring(notEquals + 2), true);
+        }
+        return null;
+    }
+
+/**
+ * Strategy: resolves a comparison operand as either a data reference or a literal value.
+ */
+    private Object resolveConditionOperand(String operand, State state) {
+        String trimmed = operand == null ? "" : operand.trim();
+        if (trimmed.startsWith("$.")) {
+            return resolver.resolve(trimmed, state.agentInput, phaseOutputs(state)).orElse(null);
+        }
+        if ((trimmed.startsWith("\"") && trimmed.endsWith("\""))
+                || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+            return trimmed.substring(1, trimmed.length() - 1);
+        }
+        if (trimmed.equalsIgnoreCase("true")) {
+            return true;
+        }
+        if (trimmed.equalsIgnoreCase("false")) {
+            return false;
+        }
+        return trimmed;
+    }
+
+/**
+ * Adapter: compares condition operands in the same simple scalar space used by YAML/JSON phase outputs.
+ */
+    private Object normalizeComparable(Object value) {
+        return value instanceof String text ? text.trim() : value;
     }
 
 /**
@@ -558,6 +741,37 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         eventSink.publish(new AgentEvent(UUID.randomUUID().toString(), Instant.now(), run.agentId(), run.runId(),
                 null, run.tenantId(), context == null ? null : context.userId(),
                 context == null ? null : context.correlationId(), null, type, payload), context);
+    }
+
+    /** Value object: parsed equality or inequality route condition. */
+    private record Comparison(String left, String right, boolean negated) {
+    }
+
+    /** Value object: result of building a structured phase output or a structured mapping failure. */
+    private record PhaseOutput(
+            boolean success,
+            Map<String, Object> values,
+            String errorCode,
+            String errorMessage
+    ) {
+        static PhaseOutput success(Map<String, Object> values) {
+            return new PhaseOutput(true, Map.copyOf(values), null, null);
+        }
+
+        static PhaseOutput failure(String errorCode, String errorMessage) {
+            return new PhaseOutput(false, Map.of(), errorCode, errorMessage);
+        }
+    }
+
+    /** Value object: result of resolving one outputMapping expression or nested mapping value. */
+    private record MappingResolution(boolean resolved, Object value) {
+        static MappingResolution success(Object value) {
+            return new MappingResolution(true, value);
+        }
+
+        static MappingResolution unresolved() {
+            return new MappingResolution(false, null);
+        }
     }
 
     /** Mutable working state threaded through a single run. */

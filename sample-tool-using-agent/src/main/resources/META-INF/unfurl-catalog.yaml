@@ -6,16 +6,16 @@ claim:
     version: 0.1.0
     publisher: Unfurl
   domain:
-    summary: Function-calling sample agent — invokes host-registered tools through Spring AI's tool-callback mechanism in response to user intent.
+    summary: Function-calling sample agent that invokes host-registered tools in response to user intent.
     concerns:
       - concern: agent.tool-using
         description: Agent that decides when to call host-registered tools (calculator / search / domain APIs) and weaves their results back into the chat reply.
     boundary_principles:
       - "Plug-and-play tooling: pulls in foundry-substrate-tools through the tool.invoke@v1 need; RAG and flow substrates are excluded by absence-of-need."
-      - "Tool implementations are host-owned (tools' own tool.implementation?owner=host need), so the agent gains capabilities by the host registering more Spring AI ToolCallback beans — never by changing the fabric composition."
+      - "Tool implementations are host-owned (tools' own tool.implementation?owner=host need), so the agent gains capabilities by the host registering more tool implementations without changing the fabric composition."
   refusals:
     - concern: tool.implementation
-      rationale: The agent decides when to call tools but does not implement them; tool implementations are host-registered Spring AI ToolCallback beans.
+      rationale: The agent decides when to call tools but does not implement them; tool implementations are host-registered ToolExecutor bindings.
       owned_by: urn:host
   dependencies:
     needs:

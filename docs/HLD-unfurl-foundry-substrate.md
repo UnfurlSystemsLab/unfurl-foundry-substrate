@@ -50,6 +50,7 @@ If an implementation starts adding a model SDK, an HTTP client, a vector-DB driv
 - AI execution-state shape (agent run, phase state, tool-call records, cost accounting metadata)
 - AI ports: model provider, embedding provider, vector store, tool executor/registry, RAG retriever, agent runtime, provider registry, cost-guardrail, permission bridge
 - AI capability **offers** expressed as DCP claim fragments (`agent.run`, `tool.call`, `rag.search`, `provider.call`)
+- recursive DCP projection bridge claims for agents, phases, skills, tools, prompts, RAG, models, and Flow workflow references; these are visualization/inspection claims, not runtime execution decisions
 - AI `ContractInvocable` implementations that expose those offers over a frozen contract
 - AI `NodeExecutor` adapters for `agent.run`, `tool.call`, `rag.search`, and `provider.call`, so flow can register AI capability in its normal substrate `CapabilityRegistry`
 - `agentRef` / `toolRef` reference resolution
@@ -146,7 +147,24 @@ Hosts load capabilities in two complementary ways, and both bottom out in the su
 
 Foundry adds a third, data-driven flavor on top of the same registry: **per-tenant Provider and Tool registries**. Foundry registers LLM/embedder providers per tenant (with encrypted credentials and concrete provider adapters) and loads tool definitions, then resolves them by logical name using `ExecutionContext`. `unfurl-foundry-substrate` provides the **registry ports** (`ProviderRegistry`, `ToolRegistry`) and the tenant-scoped `resolve(name, kind, context)` shape; the encrypted-credential store, YAML loading, and concrete adapters live in foundry. The substrate owns the port; the product owns the loader.
 
+Catalog claims for substrate components must use the neutral port names when they depend on provider implementations: `model-provider`, `embedding-provider`, and `vector-store`. Framework-specific names such as Spring AI are adapter-internal implementation details. A Spring AI adapter may declare host-owned Spring bean needs as runtime leaf bindings, but its offers still satisfy the neutral provider ports so recursive DCP closure can select it like any other provider adapter.
+
 In every case the concrete implementation behind a logical name is a **frozen, negotiated binding** — resolved at runtime, never discovered or re-negotiated in the hot path.
+
+---
+
+## Recursive DCP Projection Bridge
+
+`foundry-substrate-offers` owns the Flow/Foundry domain-to-DCP projection bridge used by Fabric Studio semantic zoom. `FoundryClaimProjector` synthesizes DCP claims from `AgentDefinition` and related declarations. The graph is phase-aware:
+
+```text
+Foundry -> Agent -> Phase -> {Prompt, Model, RAG, Tool, Skill}
+Skill -> {Prompt, Model, RAG, Tool}
+```
+
+`FlowClaimProjector` synthesizes DCP claims from `WorkflowDefinition` and bridges workflow node `uses: agent:<id>` to the shared `urn:unfurl:foundry:agent:<id>` URI. Merging the Flow and Foundry claim maps yields a single recursive graph that Fabric can render through its generic `dynamic-dcp/project` adapter without importing Flow or Foundry domain types.
+
+The bridge emits only structural DCP inspection claims with `metadata.extensions.contains`; it does not negotiate, accept, deploy, invoke, or introspect provider secrets.
 
 ---
 

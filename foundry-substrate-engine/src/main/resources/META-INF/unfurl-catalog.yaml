@@ -9,21 +9,18 @@ claim:
     summary: Model-agnostic agent orchestration runtime; the entry point for plug-and-play Foundry agents.
     concerns:
       - concern: agent.execute
-        description: Execute an agent's reasoning loop against a host-supplied Spring AI chat client, optionally enriched with substrate plugins (RAG / tools / prompt templates) that the agent declares as needs.
+        description: Execute an agent's reasoning loop against a host-supplied ModelProvider port, optionally enriched with substrate plugins (RAG / tools / prompt templates) that the agent declares as needs.
     boundary_principles:
-      - "Plug-and-play composition: the engine itself only needs a chat client; RAG and tools substrates are pulled in only when the agent's own needs request them."
-      - "Model-agnostic by construction: the engine consumes a Spring AI ChatClient bean wired by the host's Spring context, so the LLM provider is a deployment decision rather than a fabric-composition decision."
-      - "Customer-controlled secrets: API keys and host configuration travel via host-supplied Spring beans, never via Fabric design-time state."
+      - "Plug-and-play composition: the engine itself only needs a ModelProvider port; RAG and tools substrates are pulled in only when the agent's own needs request them."
+      - "Model-agnostic by construction: the engine consumes foundry's neutral ModelProvider interface, so the LLM provider is selected by an adapter or profile binding rather than by engine code."
+      - "Customer-controlled secrets: API keys and host configuration travel via provider adapters or runtime bindings, never via Fabric design-time state."
   refusals:
     - concern: ai.provider.implementation
-      rationale: The engine delegates provider-specific HTTP / SDK calls to Spring AI's provider starters; it does not implement Anthropic / OpenAI / Azure / Ollama wire formats itself.
-      owned_by: urn:spring:ai
+      rationale: The engine delegates provider-specific HTTP / SDK calls to a ModelProvider adapter; it does not implement Anthropic / OpenAI / Azure / Ollama wire formats itself.
+      owned_by: urn:unfurl:foundry:provider-adapter
   dependencies:
     needs:
-      # Host-supplied Spring AI ChatClient bean. owner=host marks this as
-      # outside the fabric composition surface (mirrors the rag.corpus
-      # and tool.implementation patterns in the sibling substrates).
-      - "spring-ai.chat-client@v1?owner=host"
+      - "model-provider@v1?transport=profile-binding&shape=com.unfurl.foundry.substrate.ports.ModelProvider"
   offers:
     - capability: agent.execute
       description: Run an agent's reasoning loop; substrate plugins are discovered via the assembly composition, not via runtime configuration.
@@ -35,15 +32,15 @@ claim:
     endpoint: in-process:foundry-substrate-engine
     protocols_supported: [IN_PROCESS]
     supported_intents:
-      - intent: bind-chat-client
-        description: Confirm the host supplies a Spring AI ChatClient bean for agent execution.
+      - intent: bind-model-provider
+        description: Confirm the host supplies a ModelProvider binding for agent execution.
       - intent: declare-substrate-plugins
         description: Declare which RAG / tool / prompt substrates the agent's needs pull in.
     answer_grounding:
       - claim.offers
       - claim.dependencies
     limitations:
-      - The engine requires a host-supplied chat client; it selects no LLM provider itself.
+      - The engine requires a ModelProvider binding; it selects no LLM provider itself.
       - Substrate plugins are composed from the agent's declared needs, not from runtime configuration.
   faults:
     emitted:
@@ -53,7 +50,7 @@ claim:
         description: Agent execution failed before producing a governed result.
         affects:
           needs:
-            - spring-ai.chat-client@v1?owner=host
+            - model-provider@v1?transport=profile-binding&shape=com.unfurl.foundry.substrate.ports.ModelProvider
           offers:
             - agent.execute
           constraints: []
@@ -64,7 +61,7 @@ claim:
           propagates_when: parent composition depends on agent.execute output
           suppresses_when: alternate agent runtime is available
         remediation:
-          allowed_actions: [retry_agent, repair_chat_client_binding, inspect_agent_state]
+          allowed_actions: [retry_agent, repair_model_provider_binding, inspect_agent_state]
   metadata:
     dcp_version: "0.2.0"
     claim_version: "0.1.0"

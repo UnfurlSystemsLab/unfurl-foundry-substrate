@@ -150,6 +150,97 @@ class EmbeddedAgentRuntimeTest {
     }
 
     @Test
+    void mapsJsonPhaseOutputIntoDownstreamInput() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(
+                        response("{\"category\":\"billing\",\"readyToPropose\":true}", List.of()),
+                        response("done", List.of())
+                )));
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry());
+        AgentPhase classify = new AgentPhase("classify", null, null, List.of(), null,
+                Map.of("prompt", "classify"), Map.of(
+                "category", "$.output.category",
+                "readyToPropose", "$.output.readyToPropose"), List.of(), 0);
+        AgentPhase resolve = new AgentPhase("resolve", null, null, List.of(), null,
+                Map.of("prompt", "$.phases.classify.output.category"), Map.of(), List.of("classify"), 0);
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(), List.of(classify, resolve),
+                List.of(), Map.of(), "model", List.of());
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.COMPLETED);
+        assertThat(run.phases().get("classify").output())
+                .containsEntry("content", "{\"category\":\"billing\",\"readyToPropose\":true}")
+                .containsEntry("category", "billing")
+                .containsEntry("readyToPropose", true);
+        assertThat(run.phases().get("resolve").input()).containsEntry("prompt", "billing");
+    }
+
+    @Test
+    void routesConditionalEdgesUsingMappedBooleanOutput() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(
+                        response("{\"readyToPropose\":false}", List.of())
+                )));
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry());
+        AgentPhase classify = new AgentPhase("classify", null, null, List.of(), null,
+                Map.of("prompt", "classify"), Map.of("readyToPropose", "$.output.readyToPropose"), List.of(), 0);
+        AgentPhase propose = phase("propose", Map.of("prompt", "propose"), List.of(), 0);
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(), List.of(classify, propose),
+                List.of(new EdgeDefinition("classify", "propose",
+                        new ConditionDefinition("$.phases.classify.output.readyToPropose"))),
+                Map.of(), "model", List.of());
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.COMPLETED);
+        assertThat(run.phases().get("classify").status()).isEqualTo(AgentPhaseStatus.COMPLETED);
+        assertThat(run.phases().get("propose").status()).isEqualTo(AgentPhaseStatus.SKIPPED);
+    }
+
+    @Test
+    void routesConditionalEdgesUsingStringEqualityOutput() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(
+                        response("{\"kind\":\"continue\"}", List.of()),
+                        response("{\"kind\":\"proposal\"}", List.of())
+                )));
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry());
+        AgentPhase classify = phase("classify", Map.of("prompt", "classify"), List.of(), 0);
+        AgentPhase propose = phase("propose", Map.of("prompt", "propose"), List.of(), 0);
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(), List.of(classify, propose),
+                List.of(new EdgeDefinition("classify", "propose",
+                        new ConditionDefinition("$.phases.classify.output.kind == 'continue'"))),
+                Map.of(), "model", List.of());
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.COMPLETED);
+        assertThat(run.phases().get("classify").status()).isEqualTo(AgentPhaseStatus.COMPLETED);
+        assertThat(run.phases().get("propose").status()).isEqualTo(AgentPhaseStatus.COMPLETED);
+        assertThat(run.phases().get("propose").output()).containsEntry("kind", "proposal");
+    }
+
+    @Test
+    void failsPhaseWhenRequiredOutputMappingCannotResolve() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(
+                        response("{}", List.of())
+                )));
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry());
+        AgentPhase phase = new AgentPhase("classify", null, null, List.of(), null,
+                Map.of("prompt", "classify"), Map.of("category", "$.output.category"), List.of(), 0);
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(), List.of(phase),
+                List.of(), Map.of(), "model", List.of());
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(run.errorCode()).isEqualTo("OUTPUT_MAPPING_UNRESOLVED");
+        assertThat(run.phases().get("classify").errorCode()).isEqualTo("OUTPUT_MAPPING_UNRESOLVED");
+    }
+
+    @Test
     void recordsTypedProviderNameAndEstimatedCost() {
         StaticProviderRegistry providers = new StaticProviderRegistry()
                 .registerModel("model", new ScriptedModelProvider(List.of(

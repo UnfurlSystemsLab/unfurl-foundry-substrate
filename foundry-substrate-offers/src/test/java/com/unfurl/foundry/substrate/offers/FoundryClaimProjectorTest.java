@@ -67,10 +67,28 @@ class FoundryClaimProjectorTest {
                 projector.toolUri("catalog-query").toString(),
                 projector.skillUri("docs-skill").toString(),
                 projector.modelUri("gemini").toString(),
+                projector.phaseUri("fabric-authoring", "clarify").toString());
+        assertThat(contains).doesNotContain(
                 projector.promptUri("main-prompt").toString(),
                 projector.ragUri("kb").toString(),
                 projector.toolUri("search").toString());
         assertThat(agentClaim.metadata().extensions()).containsEntry("level", "AGENT");
+    }
+
+    @Test
+    void phaseClaimContainsPhaseScopedRuntimeRefs() {
+        Map<URI, Claim> claims = projector.project(agent(), skills(), Map.of());
+
+        Claim phaseClaim = claims.get(projector.phaseUri("fabric-authoring", "clarify"));
+        assertThat(phaseClaim).isNotNull();
+        @SuppressWarnings("unchecked")
+        List<String> contains = (List<String>) phaseClaim.metadata().extensions().get("contains");
+        assertThat(contains).contains(
+                projector.promptUri("main-prompt").toString(),
+                projector.modelUri("gemini").toString(),
+                projector.ragUri("kb").toString(),
+                projector.toolUri("search").toString());
+        assertThat(phaseClaim.metadata().extensions()).containsEntry("level", "PHASE");
     }
 
     @Test
@@ -109,12 +127,12 @@ class FoundryClaimProjectorTest {
         DcpProjection projection = new DcpProjectionProjector().project(
                 new DcpProjectionRequest(claims.get(root), claims, root, 16, 512));
 
-        // Agent (depth 0) -> Skill (depth 1) -> Skill's tool (depth 2): recursive, no dangling warnings.
+        // Agent (depth 0) -> Phase (depth 1) -> phase runtime refs (depth 2): recursive, no dangling warnings.
         assertThat(projection.warnings()).isEmpty();
         assertThat(projection.nodes()).anyMatch(node -> node.depth() >= 2);
         assertThat(projection.edges()).anyMatch(edge ->
                 edge.fromClaimUri().equals(root)
-                        && edge.toClaimUri().equals(projector.skillUri("docs-skill"))
+                        && edge.toClaimUri().equals(projector.phaseUri("fabric-authoring", "clarify"))
                         && edge.relationship().equals("CONTAINS"));
     }
 }

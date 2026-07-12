@@ -24,16 +24,16 @@ import java.util.Map;
 
 /**
  * Projects the foundry-substrate composition graph
- * (Foundry &rarr; Agent &rarr; {Skill &rarr; {Tool, Prompt, RAG, Model}, Tool, Prompt, Model}) into DCP
+ * (Foundry &rarr; Agent &rarr; Phase &rarr; {Tool, Prompt, RAG, Model, Skill}) into DCP
  * {@link Claim}s whose {@code metadata.extensions} carry containment via
  * {@link DcpProjectionProjector#EXT_CONTAINS}.
  *
  * <p>The foundry domain types are not DCP claims and carry no containment metadata; this projector
- * <em>synthesizes</em> that metadata from their existing string refs ({@code toolRefs},
- * {@code skillRefs}, {@code defaultModelRef}, and the per-phase {@code promptTemplateRef} /
- * {@code modelRef} / {@code allowedToolRefs} / {@code ragQueryRef}). The resulting claim map can be fed
- * directly to {@link DcpProjectionProjector}, so the recursive projection (and the Studio semantic-zoom
- * navigator that consumes it) cover foundry agents with no further UI work.
+ * <em>synthesizes</em> that metadata from their existing string refs. Agent-wide refs remain under the
+ * agent claim, while per-phase {@code promptTemplateRef}, {@code modelRef}, {@code allowedToolRefs},
+ * {@code ragQueryRef}, and {@code skillRefs} are represented by explicit phase claims. The resulting
+ * claim map can be fed directly to {@link DcpProjectionProjector}, so the recursive projection (and the
+ * Studio semantic-zoom navigator that consumes it) cover foundry agents with no further UI work.
  *
  * <p>A claim is emitted for every referenced node so the projector never sees a dangling
  * {@code contains} URI. Capability {@link Offer}s reuse {@link AiOffers}, kept separate from containment.
@@ -42,6 +42,7 @@ public final class FoundryClaimProjector {
     public static final String URN_PREFIX = "urn:unfurl:foundry:";
     public static final String LEVEL_FOUNDRY = "FOUNDRY";
     public static final String LEVEL_AGENT = "AGENT";
+    public static final String LEVEL_PHASE = "PHASE";
     public static final String LEVEL_SKILL = "SKILL";
     public static final String LEVEL_TOOL = "TOOL";
     public static final String LEVEL_PROMPT = "PROMPT";
@@ -87,9 +88,10 @@ public final class FoundryClaimProjector {
         return claims;
     }
 
-/**
- * Implements the addAgent helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Builder helper: emits one agent claim, explicit phase claims, and all transitive referenced
+     * runtime claims while preserving non-dangling containment for the DCP projector.
+     */
     private void addAgent(
             AgentDefinition agent,
             Map<String, SkillDefinition> skillsById,
@@ -97,24 +99,34 @@ public final class FoundryClaimProjector {
             Map<URI, Claim> claims) {
         URI uri = agentUri(agent.id());
         LinkedHashSet<URI> children = new LinkedHashSet<>();
+        LinkedHashSet<URI> referencedRuntimeChildren = new LinkedHashSet<>();
         agent.toolRefs().forEach(ref -> children.add(toolUri(ref)));
         agent.skillRefs().forEach(ref -> children.add(skillUri(ref)));
         addIfPresent(children, agent.defaultModelRef(), this::modelUri);
         for (AgentPhase phase : agent.phases()) {
-            addIfPresent(children, phase.promptTemplateRef(), this::promptUri);
-            addIfPresent(children, phase.modelRef(), this::modelUri);
-            addIfPresent(children, phase.ragQueryRef(), this::ragUri);
-            phase.allowedToolRefs().forEach(ref -> children.add(toolUri(ref)));
-            phase.skillRefs().forEach(ref -> children.add(skillUri(ref)));
+            URI phaseUri = phaseUri(agent.id(), phase.id());
+            LinkedHashSet<URI> phaseChildren = new LinkedHashSet<>();
+            addIfPresent(phaseChildren, phase.promptTemplateRef(), this::promptUri);
+            addIfPresent(phaseChildren, phase.modelRef(), this::modelUri);
+            addIfPresent(phaseChildren, phase.ragQueryRef(), this::ragUri);
+            phase.allowedToolRefs().forEach(ref -> phaseChildren.add(toolUri(ref)));
+            phase.skillRefs().forEach(ref -> phaseChildren.add(skillUri(ref)));
+            claims.put(phaseUri, claim(phaseUri, agent.id() + "." + phase.id(), LEVEL_PHASE, ComponentKind.COMPONENT,
+                    List.copyOf(phaseChildren), List.of()));
+            children.add(phaseUri);
+            referencedRuntimeChildren.addAll(phaseChildren);
         }
         claims.put(uri, claim(uri, agent.id(), LEVEL_AGENT, ComponentKind.INTELLIGENT_COMPONENT,
                 List.copyOf(children), offersFor(AiOffers.AGENT_RUN)));
-        ensureChildren(children, skillsById, toolsByName, claims);
+        referencedRuntimeChildren.addAll(children);
+        referencedRuntimeChildren.removeIf(claims::containsKey);
+        ensureChildren(referencedRuntimeChildren, skillsById, toolsByName, claims);
     }
 
-/**
- * Projector helper: walks referenced child URIs, expands skills into their own DCP children, and leaves tool/model/rag nodes terminal.
- */
+    /**
+     * Projector helper: walks referenced child URIs, expands skills into their own DCP children, and
+     * leaves tool/model/rag/prompt nodes terminal.
+     */
     private void ensureChildren(
             LinkedHashSet<URI> seed,
             Map<String, SkillDefinition> skillsById,
@@ -158,18 +170,19 @@ public final class FoundryClaimProjector {
         }
     }
 
-/**
- * Implements the addIfPresent helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Builder helper: adds a non-blank string ref as a typed URI while preserving absent optional refs.
+     */
     private static void addIfPresent(LinkedHashSet<URI> target, String ref, java.util.function.Function<String, URI> toUri) {
         if (ref != null && !ref.isBlank()) {
             target.add(toUri.apply(ref));
         }
     }
 
-/**
- * Factory method: creates the claim result while keeping caller-facing defaults and validation in one place.
- */
+    /**
+     * Factory method: creates a structural DCP claim and carries containment only in metadata
+     * extensions, keeping capability offers separate from graph shape.
+     */
     private Claim claim(URI uri, String label, String level, ComponentKind kind, List<URI> children, List<Offer> offers) {
         Map<String, Object> extensions = new LinkedHashMap<>();
         extensions.put("level", level);
@@ -189,69 +202,77 @@ public final class FoundryClaimProjector {
                 new ClaimMetadata("0.2.0", "1.0.0", Instant.now(), extensions));
     }
 
-/**
- * Factory method: creates the offersFor result while keeping caller-facing defaults and validation in one place.
- */
+    /**
+     * Factory method: selects one canonical AI offer so generated claims align with the Foundry DCP
+     * capability surface and fault vocabulary.
+     */
     private static List<Offer> offersFor(String capability) {
         return AiOffers.standardAiOffers("1.0.0").stream()
                 .filter(offer -> offer.capability().equals(capability))
                 .toList();
     }
 
-/**
- * Implements the agentUri helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Factory method: returns the stable DCP URI used to join Flow nodes to Foundry agents.
+     */
     public URI agentUri(String id) {
         return URI.create(URN_PREFIX + "agent:" + id);
     }
 
-/**
- * Implements the skillUri helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Factory method: returns the stable DCP URI for a Foundry phase owned by an agent.
+     */
+    public URI phaseUri(String agentId, String phaseId) {
+        return URI.create(URN_PREFIX + "phase:" + agentId + "." + phaseId);
+    }
+
+    /**
+     * Factory method: returns the stable DCP URI for a governed skill reference.
+     */
     public URI skillUri(String ref) {
         return URI.create(URN_PREFIX + "skill:" + ref);
     }
 
-/**
- * Implements the toolUri helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Factory method: returns the stable DCP URI for a tool reference.
+     */
     public URI toolUri(String ref) {
         return URI.create(URN_PREFIX + "tool:" + ref);
     }
 
-/**
- * Implements the promptUri helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Factory method: returns the stable DCP URI for a prompt template or fragment reference.
+     */
     public URI promptUri(String ref) {
         return URI.create(URN_PREFIX + "prompt:" + ref);
     }
 
-/**
- * Implements the modelUri helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Factory method: returns the stable DCP URI for a model provider/config reference.
+     */
     public URI modelUri(String ref) {
         return URI.create(URN_PREFIX + "model:" + ref);
     }
 
-/**
- * Implements the ragUri helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Factory method: returns the stable DCP URI for a RAG query/source reference.
+     */
     public URI ragUri(String ref) {
         return URI.create(URN_PREFIX + "rag:" + ref);
     }
 
-/**
- * Implements the kindOf helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Parser helper: extracts the URI kind segment used by {@link #ensureChildren}.
+     */
     private static String kindOf(URI uri) {
         String rest = uri.toString().substring(URN_PREFIX.length());
         int sep = rest.indexOf(':');
         return sep < 0 ? rest : rest.substring(0, sep);
     }
 
-/**
- * Implements the refOf helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+    /**
+     * Parser helper: extracts the URI ref segment while preserving dotted or dashed domain ids.
+     */
     private static String refOf(URI uri) {
         String rest = uri.toString().substring(URN_PREFIX.length());
         int sep = rest.indexOf(':');
