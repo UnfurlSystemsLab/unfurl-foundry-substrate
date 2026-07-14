@@ -57,7 +57,7 @@ class DcpFoundryBrokerIntegrationTest {
                 null,
                 null);
 
-        Disposition disposition = broker.present(providerClaim(), ExecutionContext.empty());
+        Disposition disposition = broker.present(providerClaim(), AiOffers.TOOL_CALL, ExecutionContext.empty());
         RegistrationHandle handle = broker.accept(disposition, registrar, factory, ExecutionContext.empty());
         ContractInvocationResult result = registrar.registration(AiOffers.TOOL_CALL).orElseThrow()
                 .invoke(new ContractInvocation("ignored", "execute", "consumer", "provider",
@@ -104,7 +104,8 @@ class DcpFoundryBrokerIntegrationTest {
                 new Expectations(1000, true, false, true),
                 new Provenance(CreatedBy.FABRIC, NegotiationMode.C2C, "fabric-model", "0.2.0", false, Instant.EPOCH),
                 new Trust(TrustTier.NEUTRAL),
-                new Invalidation(List.of(InvalidationTrigger.CLAIM_VERSION_CHANGED), RuntimeViolationPolicy.HARD_FAIL));
+                new Invalidation(List.of(InvalidationTrigger.CLAIM_VERSION_CHANGED), RuntimeViolationPolicy.HARD_FAIL),
+                null);
     }
 
     private ContractSigner signer(KeyPair keyPair) {
@@ -138,9 +139,10 @@ class DcpFoundryBrokerIntegrationTest {
         }
 
         @Override
-        public Optional<FrozenContract> findByProvider(URI providerClaimUri, String providerClaimVersion) {
+        public Optional<FrozenContract> findByProvider(URI providerClaimUri, String providerClaimVersion, String providerCapability) {
             return providerClaimUri.equals(frozen.contract().parties().provider().claimUri())
                     && providerClaimVersion.equals(frozen.contract().parties().provider().claimVersion())
+                    && providerCapability.equals(frozen.contract().binding().providerCapability())
                     ? Optional.of(frozen)
                     : Optional.empty();
         }
