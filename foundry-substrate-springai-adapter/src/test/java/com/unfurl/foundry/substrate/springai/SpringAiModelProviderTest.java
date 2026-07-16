@@ -59,6 +59,41 @@ class SpringAiModelProviderTest {
     }
 
     @Test
+    void collapsesMultipleSystemMessagesWithoutDroppingConversationMessages() {
+        AtomicReference<Prompt> captured = new AtomicReference<>();
+        ChatModel chatModel = prompt -> {
+            captured.set(prompt);
+            return new ChatResponse(List.of(new Generation(new AssistantMessage("ok"))));
+        };
+        SpringAiModelProvider provider = new SpringAiModelProvider(chatModel);
+
+        ModelRequest request = new ModelRequest(
+                List.of(
+                        Message.system("base instructions"),
+                        Message.user("execute step two"),
+                        Message.system("tool-call instructions"),
+                        Message.assistant("planning"),
+                        Message.system("rag context")),
+                "test-model",
+                Map.of(),
+                List.of(),
+                Map.of());
+
+        provider.complete(request, null);
+
+        Prompt prompt = captured.get();
+        assertThat(prompt).isNotNull();
+        assertThat(prompt.getInstructions()).hasSize(3);
+        assertThat(prompt.getInstructions().get(0)).isInstanceOf(SystemMessage.class);
+        assertThat(prompt.getInstructions().get(0).getText())
+                .isEqualTo("base instructions\n\ntool-call instructions\n\nrag context");
+        assertThat(prompt.getInstructions().get(1)).isInstanceOf(UserMessage.class);
+        assertThat(prompt.getInstructions().get(1).getText()).isEqualTo("execute step two");
+        assertThat(prompt.getInstructions().get(2)).isInstanceOf(AssistantMessage.class);
+        assertThat(prompt.getInstructions().get(2).getText()).isEqualTo("planning");
+    }
+
+    @Test
     void projectsAssistantResponseIntoFoundryModelResponse() {
         ChatModel chatModel = prompt -> new ChatResponse(
                 List.of(new Generation(new AssistantMessage("hi there"))),

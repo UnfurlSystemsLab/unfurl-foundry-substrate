@@ -53,18 +53,41 @@ public final class SpringAiModelProvider implements ModelProvider {
     }
 
 /**
- * Implements the toPrompt helper for this component, preserving the surrounding input, output, and edge-case contract.
+ * Adapter projection: converts Foundry's neutral message list into the Spring AI prompt shape while
+ * satisfying providers that accept only one system instruction message.
  */
     private Prompt toPrompt(ModelRequest request) {
         List<org.springframework.ai.chat.messages.Message> springMessages = new ArrayList<>();
+        StringBuilder system = new StringBuilder();
         for (Message message : request.messages()) {
-            springMessages.add(toSpringMessage(message));
+            if (message.role() == MessageRole.SYSTEM) {
+                appendSystem(system, message.content());
+            } else {
+                springMessages.add(toSpringMessage(message));
+            }
+        }
+        if (!system.isEmpty()) {
+            springMessages.add(0, new SystemMessage(system.toString()));
         }
         // ChatOptions are typically supplied by the host's ChatModel
         // bean (model name, temperature, etc.). We omit per-call options
         // so the host's defaults govern, and the request's parameters
         // map travels via metadata only.
         return new Prompt(springMessages);
+    }
+
+/**
+ * Normalization helper: appends one Foundry system segment to the single Spring AI system
+ * instruction while preserving a clear boundary between prompt, tool, and RAG fragments.
+ */
+    private void appendSystem(StringBuilder system, String content) {
+        if (content == null || content.isBlank()) {
+            return;
+        }
+        if (!system.isEmpty()) {
+            system.append("\n\n");
+        }
+        system.append(content);
     }
 
 /**
@@ -76,14 +99,14 @@ public final class SpringAiModelProvider implements ModelProvider {
             case SYSTEM -> new SystemMessage(content);
             case USER -> new UserMessage(content);
             case ASSISTANT -> new AssistantMessage(content);
-            case TOOL -> new ToolResponseMessage(List.of(
-                    new ToolResponseMessage.ToolResponse(
+            case TOOL -> ToolResponseMessage.builder()
+                    .responses(List.of(new ToolResponseMessage.ToolResponse(
                             message.toolCallId() == null ? "" : message.toolCallId(),
-                            // Spring AI's ToolResponse needs a name; foundry's
-                            // Message doesn't carry one separately, so we use
-                            // the tool-call id as both.
+                            // Spring AI's ToolResponse needs a name; foundry's Message doesn't carry
+                            // one separately, so the adapter uses the tool-call id as both.
                             message.toolCallId() == null ? "" : message.toolCallId(),
-                            content)));
+                            content)))
+                    .build();
         };
     }
 

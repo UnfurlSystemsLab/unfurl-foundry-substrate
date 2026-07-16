@@ -253,6 +253,7 @@ Core domain types live under `com.unfurl.foundry.substrate.*`. Agent topology re
 - `ModelResponse` fields: `message`, `toolCalls`, `finishReason`, `usage` (prompt/completion tokens), `metadata`, `providerName`, `estimatedCostUsd`.
 - `providerName` and `estimatedCostUsd` are typed fields. The legacy metadata keys `providerName`, `estimatedCostUsd`, and `costUsd` are accepted as a compatibility fallback, but providers should set the typed fields.
 - These are neutral shapes. No provider-specific fields; adapters map to/from concrete SDK types outside the substrate.
+- Provider adapters may normalize the neutral message list to satisfy provider SDK constraints without changing Foundry semantics. For example, an adapter may merge multiple `SYSTEM` messages into one provider system instruction while preserving `USER`, `ASSISTANT`, and `TOOL` conversation messages in order.
 
 `RagQuery`, `RagResult`, `Chunk`
 
@@ -417,10 +418,11 @@ Start flow:
    - **Resolve the phase input from agent input and completed upstream phase outputs (the resolver is wired here — see Gap A in the substrate review).**
    - Mark phase `RUNNING`, persist, emit `PHASE_STARTED`.
    - Assemble the prompt via `foundry-substrate-prompt` (rendering resolves references into `List<Message>`).
-   - If the phase declares a RAG query, call `RagRetriever`, emit `RAG_RETRIEVED`, and fold results into the prompt.
-   - Check `CostGuardrail`; the runner attaches the resolved `AgentDefinition.budgetPolicy` to `ExecutionContext` before the check. On a tripped budget, emit `GUARDRAIL_TRIPPED` and fail the phase.
-   - Call `ModelProvider.complete`, emit `MODEL_INVOKED` and `TOKENS_CONSUMED`, update `CostAccounting` with prompt/completion tokens, provider/model attribution, and `ModelResponse.estimatedCostUsd` (with legacy metadata fallback).
-   - While the response contains tool calls and `maxToolIterations` is not exceeded: check `PermissionBridge`, resolve the tool via `ToolRegistry`, execute, emit `TOOL_CALLED`/`TOOL_COMPLETED`, append the tool result message, and call the model again.
+- If the phase declares a RAG query, call `RagRetriever`, emit `RAG_RETRIEVED`, and fold results into the prompt.
+- Check `CostGuardrail`; the runner attaches the resolved `AgentDefinition.budgetPolicy` to `ExecutionContext` before the check. On a tripped budget, emit `GUARDRAIL_TRIPPED` and fail the phase.
+- Call `ModelProvider.complete`, emit `MODEL_INVOKED` and `TOKENS_CONSUMED`, update `CostAccounting` with prompt/completion tokens, provider/model attribution, and `ModelResponse.estimatedCostUsd` (with legacy metadata fallback). The request includes the phase's allowed tool names as neutral `toolSchemas` so provider adapters with native tool/function calling can expose the same Foundry `ToolRegistry` surface.
+- While the response contains tool calls and `maxToolIterations` is not exceeded: check `PermissionBridge`, resolve the tool via `ToolRegistry`, execute, emit `TOOL_CALLED`/`TOOL_COMPLETED`, append the tool result message, and call the model again.
+  Providers without native tool/function-calling support may return a structured JSON object containing a top-level `toolCalls` array. The runtime treats that as a provider-neutral tool-call envelope only after applying the same allow-list, permission, registry, iteration, and error checks used for native `ModelResponse.toolCalls`. A final `execution` response must be grounded in tool result messages or phase `outputMapping`; model text alone is not a substitute for tool execution.
    - On success, build structured phase output, mark `COMPLETED`, persist, emit `PHASE_COMPLETED`.
      The raw assistant content is always available as `output.content`. When the content is a JSON object, the
      runner exposes it as `output.json` and makes top-level fields available to `AgentPhase.outputMapping`. A phase

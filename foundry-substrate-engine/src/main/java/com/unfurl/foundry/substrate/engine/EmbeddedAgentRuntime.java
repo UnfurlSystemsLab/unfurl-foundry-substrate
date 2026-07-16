@@ -51,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Sequential, in-process multi-phase agent runner — the AI peer of the substrate's
@@ -83,8 +84,8 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
  */
     public EmbeddedAgentRuntime(ProviderRegistry providerRegistry, ToolRegistry toolRegistry) {
         this(providerRegistry, toolRegistry, null, new BudgetPolicyCostGuardrail(), new AllowAllPermissionBridge(),
-                new NoopAgentEventSink(), new PromptAssembler(), new DataReferenceResolver(),
-                new AgentDefinitionValidator(), new InMemoryAgentRunStore(), Map.of());
+                defaultEventSink(), new PromptAssembler(), new DataReferenceResolver(),
+                new AgentDefinitionValidator(), defaultStore(), Map.of());
     }
 
 /**
@@ -108,12 +109,46 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         this.ragRetriever = ragRetriever;
         this.costGuardrail = costGuardrail;
         this.permissionBridge = permissionBridge;
-        this.eventSink = eventSink;
+        this.eventSink = eventSink == null ? defaultEventSink() : eventSink;
         this.promptAssembler = promptAssembler;
         this.resolver = resolver;
         this.validator = validator;
-        this.store = store;
+        this.store = store == null ? defaultStore() : store;
         this.templates = Map.copyOf(templates);
+    }
+
+/**
+ * Null Object factory: supplies the default no-I/O event sink used by the embedded runtime when a
+ * host does not bind an event port.
+ */
+    private static AgentEventSink defaultEventSink() {
+        return (event, context) -> {
+        };
+    }
+
+/**
+ * Factory method: creates the runtime's default in-memory run store without requiring callers to
+ * reference a separate concrete store class.
+ */
+    private static AgentRunStore defaultStore() {
+        ConcurrentHashMap<String, AgentRunState> runs = new ConcurrentHashMap<>();
+        return new AgentRunStore() {
+            /**
+             * Store operation: records the latest run snapshot by run id for single-process embedded execution.
+             */
+            @Override
+            public void save(AgentRunState run, ExecutionContext context) {
+                runs.put(run.runId(), run);
+            }
+
+            /**
+             * Store operation: loads the latest in-memory run snapshot for resume/cancel lookups.
+             */
+            @Override
+            public java.util.Optional<AgentRunState> load(String runId, ExecutionContext context) {
+                return java.util.Optional.ofNullable(runs.get(runId));
+            }
+        };
     }
 
 /**
@@ -286,7 +321,11 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                             "Tool failed: " + call.toolName(), started);
                 }
                 emit(context, state, phase.id(), AgentEventType.TOOL_COMPLETED, Map.of("tool", call.toolName()));
-                messages.add(Message.tool(call.id(), String.valueOf(toolResult.output())));
+                messages.add(new Message(
+                        com.unfurl.foundry.substrate.model.MessageRole.TOOL,
+                        String.valueOf(toolResult.output()),
+                        call.id(),
+                        Map.of("toolName", call.toolName())));
             }
             iterations++;
             response = callModel(state, phase, provider, messages, modelRef, context);
@@ -432,8 +471,12 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
  */
     private ModelResponse callModel(State state, AgentPhase phase, ModelProvider provider, List<Message> messages,
                                     String modelRef, ExecutionContext context) {
-        ModelRequest request = new ModelRequest(List.copyOf(messages), modelRef, phase.input(), List.of(), Map.of());
-        ModelResponse response = provider.complete(request, context);
+        List<Map<String, Object>> toolSchemas = toolSchemas(state.agent, phase, context);
+        List<Message> requestMessages = toolSchemas.isEmpty()
+                ? List.copyOf(messages)
+                : messagesWithToolInstructions(messages, toolSchemas);
+        ModelRequest request = new ModelRequest(requestMessages, modelRef, phase.input(), toolSchemas, Map.of());
+        ModelResponse response = structuredToolCalls(provider.complete(request, context));
         emit(context, state, phase.id(), AgentEventType.MODEL_INVOKED, Map.of("modelRef", String.valueOf(modelRef)));
         long prompt = response.usage().promptTokens();
         long completion = response.usage().completionTokens();
@@ -441,6 +484,118 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         emit(context, state, phase.id(), AgentEventType.TOKENS_CONSUMED,
                 Map.of("promptTokens", prompt, "completionTokens", completion));
         return response;
+    }
+
+/**
+ * Tool schema projector: exposes the phase's allowed Foundry tool names to provider adapters without leaking
+ * concrete executor implementations or transport details out of the ToolRegistry port.
+ */
+    private List<Map<String, Object>> toolSchemas(AgentDefinition agent, AgentPhase phase, ExecutionContext context) {
+        List<String> candidates = phase.allowedToolRefs().isEmpty() ? agent.toolRefs() : phase.allowedToolRefs();
+        List<Map<String, Object>> schemas = new ArrayList<>();
+        for (String toolName : candidates) {
+            if (toolName == null || toolName.isBlank() || !toolRegistry.hasTool(toolName, context)) {
+                continue;
+            }
+            schemas.add(Map.of(
+                    "name", toolName,
+                    "description", "Foundry registered tool: " + toolName,
+                    "inputSchema", Map.of(
+                            "type", "object",
+                            "additionalProperties", true)));
+        }
+        return List.copyOf(schemas);
+    }
+
+/**
+ * Prompt adapter: adds a provider-neutral textual tool-call contract for model adapters that do not support
+ * native function-call blocks while still allowing adapters to consume ModelRequest.toolSchemas directly.
+ */
+    private List<Message> messagesWithToolInstructions(List<Message> messages, List<Map<String, Object>> toolSchemas) {
+        List<Message> requestMessages = new ArrayList<>(messages);
+        requestMessages.add(0, Message.system("""
+                Foundry tools are available for this phase. To call a tool, respond with JSON only:
+                {"toolCalls":[{"id":"stable-call-id","toolName":"<one of the allowed tools>","arguments":{}}]}
+                After a TOOL message is returned, use that real tool result to produce the requested terminal JSON.
+                Do not claim kind=execution unless a tool result was supplied.
+                Allowed tools:
+                %s
+                """.formatted(toolSchemas)));
+        return List.copyOf(requestMessages);
+    }
+
+/**
+ * Tool-call strategy: accepts a structured textual `toolCalls` envelope from providers without native tool
+ * calling and converts it into the same ModelToolCall list used by native adapters.
+ */
+    private ModelResponse structuredToolCalls(ModelResponse response) {
+        if (response == null || response.hasToolCalls() || response.message() == null) {
+            return response;
+        }
+        List<ModelToolCall> calls = parseStructuredToolCalls(response.message().content());
+        if (calls.isEmpty()) {
+            return response;
+        }
+        return new ModelResponse(
+                response.message(),
+                calls,
+                response.finishReason(),
+                response.usage(),
+                response.metadata(),
+                response.providerName(),
+                response.estimatedCostUsd());
+    }
+
+/**
+ * JSON parser: reads the optional top-level `toolCalls` array used by the provider-neutral fallback contract.
+ */
+    private List<ModelToolCall> parseStructuredToolCalls(String content) {
+        java.util.Optional<Map<String, Object>> parsed = parseJsonObject(content);
+        if (parsed.isEmpty()) {
+            return List.of();
+        }
+        Object raw = parsed.get().get("toolCalls");
+        if (!(raw instanceof List<?>)) {
+            raw = parsed.get().get("tool_calls");
+        }
+        if (!(raw instanceof List<?> rawList)) {
+            return List.of();
+        }
+        List<ModelToolCall> calls = new ArrayList<>();
+        int index = 0;
+        for (Object item : rawList) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            String toolName = stringValue(map.get("toolName"));
+            if (toolName.isBlank()) {
+                toolName = stringValue(map.get("name"));
+            }
+            if (toolName.isBlank()) {
+                continue;
+            }
+            String id = stringValue(map.get("id"));
+            if (id.isBlank()) {
+                id = "tool-call-" + (++index);
+            }
+            Object arguments = map.get("arguments");
+            Map<?, ?> argumentMap = arguments instanceof Map<?, ?> current
+                    ? current
+                    : map.get("args") instanceof Map<?, ?> next ? next : Map.of();
+            Map<String, Object> normalizedArguments = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : argumentMap.entrySet()) {
+                normalizedArguments.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            calls.add(new ModelToolCall(id, toolName, normalizedArguments));
+        }
+        return List.copyOf(calls);
+    }
+
+/**
+ * Text helper: normalizes nullable JSON scalar values for structured tool-call parsing.
+ */
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
 /**
