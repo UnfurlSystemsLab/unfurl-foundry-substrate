@@ -334,6 +334,16 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                         call.id(),
                         Map.of("toolName", call.toolName())));
             }
+            java.util.Optional<AgentPhaseState> mappedToolPhase = mappedToolPhaseIfComplete(
+                    phase,
+                    resolvedInput,
+                    messages,
+                    response.message() == null ? "" : response.message().content(),
+                    toolCalls,
+                    started);
+            if (mappedToolPhase.isPresent()) {
+                return mappedToolPhase.get();
+            }
             iterations++;
             response = callModel(state, phase, provider, messages, modelRef, context);
             messages.add(response.message() == null ? Message.assistant("") : response.message());
@@ -350,6 +360,38 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         }
         return new AgentPhaseState(phase.id(), AgentPhaseStatus.COMPLETED, resolvedInput, List.copyOf(messages),
                 List.copyOf(toolCalls), output.values(), null, null, started, Instant.now());
+    }
+
+/**
+ * Strategy: completes deterministic tool phases directly from outputMapping when
+ * the mapping is fully satisfied by the executed tool calls.
+ */
+    private java.util.Optional<AgentPhaseState> mappedToolPhaseIfComplete(
+            AgentPhase phase,
+            Map<String, Object> resolvedInput,
+            List<Message> messages,
+            String content,
+            List<ToolCall> toolCalls,
+            Instant started
+    ) {
+        if (phase.outputMapping().isEmpty() || toolCalls.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        PhaseOutput output = buildPhaseOutput(phase, content == null ? "" : content, toolCalls);
+        if (!output.success()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new AgentPhaseState(
+                phase.id(),
+                AgentPhaseStatus.COMPLETED,
+                resolvedInput,
+                List.copyOf(messages),
+                List.copyOf(toolCalls),
+                output.values(),
+                null,
+                null,
+                started,
+                Instant.now()));
     }
 
 /**

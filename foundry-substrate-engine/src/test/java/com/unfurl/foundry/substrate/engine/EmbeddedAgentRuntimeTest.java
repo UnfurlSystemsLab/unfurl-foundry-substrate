@@ -149,6 +149,60 @@ class EmbeddedAgentRuntimeTest {
     }
 
     @Test
+    void completesMappedToolPhaseWithoutSecondModelTurn() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(
+                        response("{\"toolCalls\":[{\"id\":\"step-02-catalog-admit\",\"toolName\":\"catalog.admit\",\"arguments\":{}}]}",
+                                List.of(new ModelToolCall("step-02-catalog-admit", "catalog.admit", Map.of())))
+                )));
+        RecordingToolExecutor executor = new RecordingToolExecutor(Map.of(
+                "status", "PASS",
+                "artifact", Map.of("sha256", "sha256:abc")));
+        DefaultToolRegistry tools = new DefaultToolRegistry();
+        tools.register("catalog.admit", executor);
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, tools);
+        AgentPhase phase = new AgentPhase(
+                "execute",
+                null,
+                null,
+                List.of("catalog.admit"),
+                null,
+                Map.of("prompt", "execute"),
+                Map.of(
+                        "kind", "execution",
+                        "phase", "catalog-creation",
+                        "step", 2,
+                        "toolResult", "$.tools.step-02-catalog-admit.output",
+                        "toolCalls", List.of(Map.of(
+                                "id", "step-02-catalog-admit",
+                                "toolName", "catalog.admit",
+                                "status", "$.tools.step-02-catalog-admit.output.status")),
+                        "artifacts", List.of(Map.of(
+                                "sha256", "$.tools.step-02-catalog-admit.output.artifact.sha256"))),
+                List.of(),
+                1);
+        AgentDefinition agent = new AgentDefinition(
+                "agent",
+                "1",
+                Map.of(),
+                List.of(phase),
+                List.of(),
+                Map.of(),
+                "model",
+                List.of("catalog.admit"));
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.COMPLETED);
+        assertThat(executor.calls()).hasSize(1);
+        assertThat(run.phases().get("execute").output())
+                .containsEntry("kind", "execution")
+                .containsEntry("phase", "catalog-creation")
+                .containsEntry("step", 2);
+        assertThat(run.phases().get("execute").toolCalls()).hasSize(1);
+    }
+
+    @Test
     void failsBeforeNextPhaseWhenResolvedAgentBudgetIsExhausted() {
         StaticProviderRegistry providers = new StaticProviderRegistry()
                 .registerModel("model", new ScriptedModelProvider(List.of(
