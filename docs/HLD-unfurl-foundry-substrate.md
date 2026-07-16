@@ -34,7 +34,7 @@ This document mirrors the substrate's design philosophy and voice deliberately. 
 1. **Logical independence:** the AI model and ports that let flow and foundry remain peers — agent/tool/model/rag/embedding shapes, AI capability *offers*, and execution-state vocabulary shared without internal coupling.
 2. **Physical collapsibility:** the AI capabilities a host exposes through `CapabilityRegistry` and invokes through `ContractInvocable`, so an agent in foundry and a durable DAG in flow can be co-packaged into one deployable and still talk through contract-shaped calls.
 
-The substrate ships only a **minimal embedded agent runner**: enough to run a multi-phase agent in-process with injected ports, an in-memory run state, and no-op providers. Durable execution, distributed execution, streaming, retries, concrete model/embedding/vector calls, per-tenant credential stores, and model hosting belong to `unfurl-foundry`, not here.
+The substrate ships only a **minimal embedded agent runner** and a **minimal embedded agent harness**: enough to run a multi-phase agent in-process with injected ports, an in-memory run state, and no-op providers, and enough to repeat bounded agent turns until the agent returns a terminal, clarification, gap, or continue envelope. Durable execution, distributed execution, streaming, retries, concrete model/embedding/vector calls, per-tenant credential stores, and model hosting belong to `unfurl-foundry`, not here.
 
 If an implementation starts adding a model SDK, an HTTP client, a vector-DB driver, a credential store, durable persistence, or design-time negotiation intelligence, stop. That belongs above the substrate.
 
@@ -48,7 +48,7 @@ If an implementation starts adding a model SDK, an HTTP client, a vector-DB driv
 - tool, prompt/message, model-request/response, RAG query/result, and embedding shapes
 - `FoundrySubstrateCodec` for stable JSON/YAML round trips of public model records
 - AI execution-state shape (agent run, phase state, tool-call records, cost accounting metadata)
-- AI ports: model provider, embedding provider, vector store, tool executor/registry, RAG retriever, agent runtime, provider registry, cost-guardrail, permission bridge
+- AI ports: model provider, embedding provider, vector store, tool executor/registry, RAG retriever, agent runtime, agent harness runtime, provider registry, cost-guardrail, permission bridge
 - AI capability **offers** expressed as DCP claim fragments (`agent.run`, `tool.call`, `rag.search`, `provider.call`)
 - recursive DCP projection bridge claims for agents, phases, skills, tools, prompts, RAG, models, and Flow workflow references; these are visualization/inspection claims, not runtime execution decisions
 - AI `ContractInvocable` implementations that expose those offers over a frozen contract
@@ -56,7 +56,7 @@ If an implementation starts adding a model SDK, an HTTP client, a vector-DB driv
 - `agentRef` / `toolRef` reference resolution
 - AI event schema
 - cost-accounting and metering shapes — per-run token/cost capture and metering-grade event metadata — `BudgetPolicy`, and the `CostGuardrail` decision port with a no-I/O `BudgetPolicyCostGuardrail` default, without aggregation, persistence, quota state, or billing
-- a minimal embedded agent runner with in-memory state and no-op providers
+- a minimal embedded agent runner and harness runner with in-memory state and no-op providers
 
 `unfurl-foundry-substrate` does not own:
 
@@ -83,6 +83,7 @@ unfurl-dcp                 Claim / CompositionContract / Disposition schemas
 unfurl-fabric              DESIGN-TIME negotiation intelligence -> frozen composition contracts
 unfurl-foundry-substrate   AI domain shapes + AI ports + AI capability OFFERS (DCP-shaped)
                            + AI NodeExecutor/ContractInvocable impls + minimal EmbeddedAgentRuntime
+                           + minimal EmbeddedAgentHarnessRuntime
 unfurl-flow                HOST: deterministic orchestrator; registers AI executors to gain AI capability
 unfurl-foundry             HOST + RUNTIME: adds durable/distributed runtime, provider adapters,
                            vector store, per-tenant registries, server
@@ -91,6 +92,21 @@ unfurl-foundry             HOST + RUNTIME: adds durable/distributed runtime, pro
 Dependency direction: `unfurl-foundry-substrate -> unfurl-substrate` (reuses domain, ports, composition-api, resolver) and `-> unfurl-dcp` (only for claim/contract types, and only in the `offers` module). It never depends on `unfurl-flow`, `unfurl-foundry`, or `unfurl-fabric`. Hosts depend on it; it depends on no host.
 
 The deterministic substrate and the AI substrate are **peers** — two thin layers of the same kind. A host (flow or foundry) composes whichever it needs.
+
+---
+
+### Agent Harness Boundary
+
+An agent harness is the bounded control loop that repeatedly invokes an agent, observes the structured terminal phase output, and decides whether the agent is done, needs clarification, has found a gap, or should continue with new input. It is deliberately one level above `AgentDefinition`: the agent DAG still owns phase topology and tool use inside a turn, while the harness owns repeated turns around that agent.
+
+The substrate owns the portable harness model and `AgentHarnessRuntime` port so embedded hosts can use the same construct without importing the Foundry product. The embedded substrate harness is sequential, in-memory, and deterministic. It recognizes the following terminal output convention:
+
+- `kind: continue` with `nextInput` as an object: run another bounded turn.
+- `kind: clarify` or a non-empty `questions` list: stop in `WAITING_FOR_USER`.
+- `kind: gap` or a non-empty `unmet` list: stop in `GAP`.
+- any other completed agent output: stop in `COMPLETED`.
+
+Foundry owns durable/persisted harness execution, server APIs, recovery, queueing, streaming, and deployment wiring. Flow may still use Foundry through DCP `agent.run` or a future coarse-grained harness binding; Flow does not need to model the inner agentic loop as a chatty DAG.
 
 ---
 

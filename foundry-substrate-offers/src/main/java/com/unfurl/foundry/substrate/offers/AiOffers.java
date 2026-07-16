@@ -17,6 +17,7 @@ import com.unfurl.dcp.fault.FaultSeverity;
 import com.unfurl.dcp.fault.ParentImpact;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,14 @@ public final class AiOffers {
     public static final String RAG_SEARCH = "rag.search";
     public static final String PROVIDER_CALL = "provider.call";
     public static final String SKILL_INVOKE = "skill.invoke";
+    public static final String MODE_SIMPLE = "simple";
+    public static final String MODE_HARNESS = "harness";
+    public static final String DETAIL_OPERATION = "operation";
+    public static final String DETAIL_INPUT_SHAPE = "inputShape";
+    public static final String DETAIL_OUTPUT_SHAPE = "outputShape";
+    public static final String DETAIL_EXECUTION_MODES = "execution_modes";
+    public static final String DETAIL_DEFAULT_EXECUTION_MODE = "default_execution_mode";
+    public static final String DETAIL_MODE_POLICIES = "mode_policies";
 
 /**
  * Constructs AiOffers with the dependencies or value fields required by this component and preserves constructor validation invariants.
@@ -43,13 +52,52 @@ public final class AiOffers {
  */
     public static List<Offer> standardAiOffers(String version) {
         return List.of(
-                metered(AGENT_RUN, "Run an agent", "start", version, "AgentInput", "AgentOutput", "tokens"),
+                agentRunOffer(version),
                 unmetered(TOOL_CALL, "Call an allowed tool", "execute", version, "ToolCallRequest", "ToolCallResult"),
                 metered(RAG_SEARCH, "Retrieve grounded context", "retrieve", version, "RagQuery", "RagResult", "tokens"),
                 metered(PROVIDER_CALL, "Call a configured model provider", "complete", version, "ModelRequest", "ModelResponse", "tokens"),
                 metered(SKILL_INVOKE, "Resolve and invoke a governed skill", "invoke", version,
                         "SkillInvocationRequest", "SkillInvocationResult", "tokens")
         );
+    }
+
+/**
+ * Factory method: creates the canonical {@code agent.run} offer with both simple and harness
+ * execution modes advertised through DCP offer details.
+ */
+    public static Offer agentRunOffer(String version) {
+        return agentRunOffer(version, List.of(MODE_SIMPLE, MODE_HARNESS), MODE_SIMPLE, defaultAgentModePolicies());
+    }
+
+/**
+ * Factory method: creates an {@code agent.run} offer for a concrete agent or deployment profile.
+ * The execution-mode detail lets DCP resolution select harness-capable agents deterministically.
+ */
+    public static Offer agentRunOffer(
+            String version,
+            List<String> executionModes,
+            String defaultExecutionMode,
+            Map<String, Object> modePolicies) {
+        List<String> modes = normalizeModes(executionModes);
+        String defaultMode = defaultExecutionMode == null || defaultExecutionMode.isBlank()
+                ? modes.getFirst()
+                : defaultExecutionMode;
+        if (!modes.contains(defaultMode)) {
+            throw new IllegalArgumentException("default execution mode must be one of executionModes");
+        }
+        Map<String, Object> details = new LinkedHashMap<>(baseDetails("start", "AgentInput", "AgentOutput"));
+        details.put(DETAIL_EXECUTION_MODES, modes);
+        details.put(DETAIL_DEFAULT_EXECUTION_MODE, defaultMode);
+        details.put(DETAIL_MODE_POLICIES, modePolicies == null ? Map.of() : Map.copyOf(modePolicies));
+        return new Offer(
+                AGENT_RUN,
+                "Run an agent",
+                ConsumerAccess.ANY,
+                new OfferInterface(InterfaceKind.IN_PROCESS, details),
+                Stability.STABLE,
+                version,
+                true,
+                "metered=true; unit=tokens");
     }
 
 /**
@@ -172,10 +220,48 @@ public final class AiOffers {
                 capability,
                 description,
                 ConsumerAccess.ANY,
-                new OfferInterface(InterfaceKind.IN_PROCESS, Map.of("operation", operation, "inputShape", input, "outputShape", output)),
+                new OfferInterface(InterfaceKind.IN_PROCESS, baseDetails(operation, input, output)),
                 Stability.STABLE,
                 version,
                 metered,
                 costImplications);
+    }
+
+/**
+ * Builder helper: creates stable DCP offer-interface details while preserving legacy Java
+ * shape key names already consumed by existing claims.
+ */
+    private static Map<String, Object> baseDetails(String operation, String input, String output) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put(DETAIL_OPERATION, operation);
+        details.put(DETAIL_INPUT_SHAPE, input);
+        details.put(DETAIL_OUTPUT_SHAPE, output);
+        return Map.copyOf(details);
+    }
+
+/**
+ * Normalizer: keeps execution-mode lists non-empty, ordered, and duplicate-free for
+ * deterministic DCP claim output.
+ */
+    private static List<String> normalizeModes(List<String> executionModes) {
+        LinkedHashSet<String> modes = new LinkedHashSet<>();
+        for (String mode : executionModes == null ? List.<String>of() : executionModes) {
+            if (mode != null && !mode.isBlank()) {
+                modes.add(mode);
+            }
+        }
+        if (modes.isEmpty()) {
+            modes.add(MODE_SIMPLE);
+        }
+        return List.copyOf(modes);
+    }
+
+/**
+ * Builder helper: documents the default harness policy exposed by product-level Foundry claims.
+ */
+    private static Map<String, Object> defaultAgentModePolicies() {
+        return Map.of(
+                MODE_SIMPLE, Map.of("max_turns_default", 1, "resume", "none"),
+                MODE_HARNESS, Map.of("max_turns_default", 4, "max_turns_max", 16, "resume", "in_memory"));
     }
 }

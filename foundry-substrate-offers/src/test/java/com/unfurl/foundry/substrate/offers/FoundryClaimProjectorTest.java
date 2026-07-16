@@ -76,6 +76,35 @@ class FoundryClaimProjectorTest {
     }
 
     @Test
+    void agentClaimCarriesPerAgentExecutionModesInDcpOfferDetails() {
+        AgentDefinition harnessAgent = new AgentDefinition(
+                "fabric-authoring",
+                "1.0.0",
+                Map.of(
+                        "execution_modes", List.of(AiOffers.MODE_SIMPLE, AiOffers.MODE_HARNESS),
+                        "default_execution_mode", AiOffers.MODE_HARNESS,
+                        "mode_policies", Map.of(AiOffers.MODE_HARNESS, Map.of("max_turns_max", 8))),
+                agent().phases(),
+                List.of(),
+                Map.of(),
+                "gemini",
+                List.of(),
+                BudgetPolicy.none(),
+                List.of());
+
+        Claim agentClaim = projector.project(harnessAgent, Map.of(), Map.of()).get(projector.agentUri("fabric-authoring"));
+
+        assertThat(agentClaim.offers()).hasSize(1);
+        assertThat(agentClaim.offers().getFirst().offerInterface().details())
+                .containsEntry(AiOffers.DETAIL_EXECUTION_MODES, List.of(AiOffers.MODE_SIMPLE, AiOffers.MODE_HARNESS))
+                .containsEntry(AiOffers.DETAIL_DEFAULT_EXECUTION_MODE, AiOffers.MODE_HARNESS);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> policies = (Map<String, Object>) agentClaim.offers().getFirst()
+                .offerInterface().details().get(AiOffers.DETAIL_MODE_POLICIES);
+        assertThat(policies).containsKey(AiOffers.MODE_HARNESS);
+    }
+
+    @Test
     void phaseClaimContainsPhaseScopedRuntimeRefs() {
         Map<URI, Claim> claims = projector.project(agent(), skills(), Map.of());
 

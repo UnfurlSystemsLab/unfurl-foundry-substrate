@@ -117,7 +117,7 @@ public final class FoundryClaimProjector {
             referencedRuntimeChildren.addAll(phaseChildren);
         }
         claims.put(uri, claim(uri, agent.id(), LEVEL_AGENT, ComponentKind.INTELLIGENT_COMPONENT,
-                List.copyOf(children), offersFor(AiOffers.AGENT_RUN)));
+                List.copyOf(children), agentRunOffers(agent)));
         referencedRuntimeChildren.addAll(children);
         referencedRuntimeChildren.removeIf(claims::containsKey);
         ensureChildren(referencedRuntimeChildren, skillsById, toolsByName, claims);
@@ -210,6 +210,89 @@ public final class FoundryClaimProjector {
         return AiOffers.standardAiOffers("1.0.0").stream()
                 .filter(offer -> offer.capability().equals(capability))
                 .toList();
+    }
+
+    /**
+     * Factory method: creates the {@code agent.run} offer for one concrete agent, allowing
+     * agent metadata to narrow execution modes while keeping the DCP capability name stable.
+     */
+    private static List<Offer> agentRunOffers(AgentDefinition agent) {
+        Map<String, Object> metadata = agent.metadata();
+        return List.of(AiOffers.agentRunOffer(
+                "1.0.0",
+                stringList(firstPresent(metadata, "execution_modes", "executionModes")),
+                stringValue(firstPresent(metadata, "default_execution_mode", "defaultExecutionMode")),
+                mapValue(firstPresent(metadata, "mode_policies", "modePolicies"))));
+    }
+
+    /**
+     * Metadata reader: returns the first present value across snake_case and Java-style aliases.
+     */
+    private static Object firstPresent(Map<String, Object> metadata, String... keys) {
+        for (String key : keys) {
+            if (metadata != null && metadata.containsKey(key)) {
+                return metadata.get(key);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Metadata adapter: normalizes a scalar or collection metadata value into a string list.
+     */
+    private static List<String> stringList(Object value) {
+        if (value instanceof Iterable<?> iterable) {
+            List<String> values = new java.util.ArrayList<>();
+            for (Object item : iterable) {
+                if (item != null && !String.valueOf(item).isBlank()) {
+                    values.add(String.valueOf(item));
+                }
+            }
+            return List.copyOf(values);
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            return List.of(text.split(",")).stream()
+                    .map(String::trim)
+                    .filter(mode -> !mode.isBlank())
+                    .toList();
+        }
+        return List.of(AiOffers.MODE_SIMPLE);
+    }
+
+    /**
+     * Metadata adapter: returns a string metadata value or an empty value when absent.
+     */
+    private static String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    /**
+     * Metadata adapter: converts map-like metadata into the DCP details shape expected by AiOffers.
+     */
+    private static Map<String, Object> mapValue(Object value) {
+        if (!(value instanceof Map<?, ?> map)) {
+            return Map.of();
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        map.forEach((key, nextValue) -> normalized.put(String.valueOf(key), normalizeValue(nextValue)));
+        return Map.copyOf(normalized);
+    }
+
+    /**
+     * Metadata adapter: recursively normalizes nested mode-policy maps while preserving scalar values.
+     */
+    private static Object normalizeValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return mapValue(map);
+        }
+        if (value instanceof Iterable<?> iterable) {
+            List<Object> values = new java.util.ArrayList<>();
+            for (Object item : iterable) {
+                values.add(normalizeValue(item));
+            }
+            return List.copyOf(values);
+        }
+        return value;
     }
 
     /**

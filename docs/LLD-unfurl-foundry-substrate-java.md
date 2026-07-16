@@ -99,7 +99,9 @@ foundry-substrate-domain
   contains:
     AgentDefinition, AgentPhase, ToolDefinition, Message, PromptTemplate,
     ModelRequest/ModelResponse, RagQuery/RagResult/Chunk, EmbeddingRequest/EmbeddingResult,
-    AgentRunState, AgentPhaseState, ToolCall, CostAccounting, statuses, identities,
+    AgentHarnessDefinition, AgentHarnessLoopPolicy,
+    AgentRunState, AgentHarnessRunState, AgentHarnessObservation,
+    AgentPhaseState, ToolCall, CostAccounting, statuses, identities,
     AgentDefinitionValidator
   may depend on:
     substrate-domain, Jackson annotations/datatype support, Jakarta Validation API
@@ -120,6 +122,7 @@ foundry-substrate-ports
   contains:
     ModelProvider, EmbeddingProvider, VectorStore, ToolExecutor, ToolRegistry,
     RagRetriever, AgentRuntime, ProviderRegistry, CostGuardrail, PermissionBridge,
+    AgentHarnessRuntime,
     NodeExecutor adapters for agent.run/tool.call/rag.search/provider.call,
     no-op/default port types
   may depend on:
@@ -180,7 +183,7 @@ foundry-substrate-engine
   package:
     com.unfurl.foundry.substrate.engine
   contains:
-    EmbeddedAgentRuntime, in-memory AgentRunStore, no-op providers
+    EmbeddedAgentRuntime, EmbeddedAgentHarnessRuntime, in-memory AgentRunStore, no-op providers
   may depend on:
     foundry-substrate-domain, foundry-substrate-ports, foundry-substrate-prompt,
     foundry-substrate-tools, foundry-substrate-rag, foundry-substrate-resolver,
@@ -230,6 +233,30 @@ Core domain types live under `com.unfurl.foundry.substrate.*`. Agent topology re
 - Fields: `defaultBudgetUsd`, `maxBudgetUsd`, `maxPromptTokens`, `maxCompletionTokens`, `maxTotalTokens`, `metadata`.
 - This is policy metadata, not spend persistence. Concrete rate tables, quota state, rollups, dashboards, and billing exports remain in `unfurl-foundry`.
 - When an agent is invoked from flow through `agentRef`, the effective budget is `min(resolvedAgentBudget, remainingWorkflowRunBudget)` for USD ceilings, plus any token ceilings declared here.
+
+`AgentHarnessDefinition`
+
+- Fields: `id`, `version`, `metadata`, `agent`, `loopPolicy`.
+- A bounded control loop around one `AgentDefinition`. The wrapped agent still owns phase topology, prompt assembly, model/tool/RAG calls, and phase output. The harness owns repeated turns around that agent.
+- The harness never invents a tool or executor surface. A turn is always an `AgentRuntime.start(...)` call through the port boundary.
+
+`AgentHarnessLoopPolicy`
+
+- Fields: `maxTurns`, `maxDurationMillis`, `metadata`.
+- `maxTurns` is required to be positive and defaults to one turn for simple embedded execution. `maxDurationMillis` is optional (`0` means no wall-clock deadline inside the embedded runner). Hosts may impose stricter outer envelopes, but not looser ones.
+
+Harness terminal output convention:
+
+- `kind: continue` with object-valued `nextInput`: run another turn with that input.
+- `kind: clarify` or a non-empty `questions` list: stop in `WAITING_FOR_USER`.
+- `kind: gap` or a non-empty `unmet` list: stop in `GAP`.
+- any other completed agent output: stop in `COMPLETED`.
+
+`AgentHarnessRunState` and `AgentHarnessObservation`
+
+- `AgentHarnessRunState`: harness run id, harness id/version, tenant, status, current turn, original input, latest input, observations, output, failure details, timestamps.
+- `AgentHarnessObservation`: turn number, agent run id/status, agent output, decision kind, message, timestamps.
+- These are execution snapshots for a bounded embedded loop. Durable checkpoints, external waits, streaming, queue ownership, and persisted recovery remain in `unfurl-foundry`.
 
 `AgentPhase`
 
@@ -315,6 +342,12 @@ public interface AgentRuntime {
     AgentRunState start(AgentDefinition agent, Map<String, Object> input, ExecutionContext context);
     AgentRunState resume(String runId, Map<String, Object> signal, ExecutionContext context);
     AgentRunState cancel(String runId, ExecutionContext context);
+}
+
+public interface AgentHarnessRuntime {
+    AgentHarnessRunState start(AgentHarnessDefinition harness, Map<String, Object> input, ExecutionContext context);
+    AgentHarnessRunState resume(String runId, Map<String, Object> signal, ExecutionContext context);
+    AgentHarnessRunState cancel(String runId, ExecutionContext context);
 }
 
 public interface ProviderRegistry {
@@ -451,6 +484,32 @@ Constraints:
 - Execution is sequential only; no parallel phases, durability, or retries.
 - The tool-call loop within a phase is bounded by `maxToolIterations`.
 - No concrete model/embedding/vector calls happen in the substrate; they go through ports whose concrete bindings are supplied by foundry/adapters.
+
+`EmbeddedAgentHarnessRuntime` is a sequential in-process control loop around `AgentRuntime`.
+
+Start flow:
+
+1. Validate the `AgentHarnessDefinition`: id/version present, wrapped agent present, wrapped agent valid, positive turn budget.
+2. Create an `AgentHarnessRunState` with status `RUNNING`, original input, latest input, and empty observations.
+3. For each turn until `loopPolicy.maxTurns` or `loopPolicy.maxDurationMillis` is exceeded:
+   - Call `AgentRuntime.start(harness.agent(), latestInput, context)`.
+   - Extract the agent's structured terminal output from completed phase outputs. The last completed phase in declaration order is the terminal output unless the agent metadata names a terminal phase.
+   - Record an `AgentHarnessObservation` with the agent run id/status, output, and interpreted decision.
+   - If the agent run failed or cancelled, mark the harness `FAILED` or `CANCELLED`.
+   - If the output is `kind: continue` and `nextInput` is an object, set that as the latest input and start the next turn.
+   - If the output is `kind: clarify` or has non-empty `questions`, mark `WAITING_FOR_USER`.
+   - If the output is `kind: gap` or has non-empty `unmet`, mark `GAP`.
+   - Otherwise mark `COMPLETED`.
+4. If the loop exhausts its policy without a terminal decision, mark `FAILED` with `HARNESS_MAX_TURNS_EXCEEDED` or `HARNESS_DEADLINE_EXCEEDED`.
+
+Resume flow:
+
+- The embedded harness can resume only `WAITING_FOR_USER` runs it still has in memory. The signal is merged into the previous latest input under `signal` and used for the next bounded turn.
+- Durable suspend/resume, persisted recovery, and external scheduler ownership remain in `unfurl-foundry`.
+
+Cancellation:
+
+- Mark the harness `CANCELLED` and return the latest in-memory snapshot. The embedded harness does not cancel already completed inner agent runs; durable cooperative cancellation belongs above the substrate.
 
 ---
 

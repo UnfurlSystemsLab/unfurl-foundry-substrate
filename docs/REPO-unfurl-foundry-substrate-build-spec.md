@@ -17,6 +17,8 @@ mvn -pl unfurl-foundry-substrate -am test
 ## Test Focus
 
 - Agent substrate record round trips.
+- Agent harness definition/state round trips and validation.
+- Embedded agent harness turn loop behavior: continue, clarification wait, gap, completion, policy exhaustion.
 - Tool, prompt, event, and model boundary contracts.
 - Compatibility with `unfurl-foundry` runtime consumers.
 

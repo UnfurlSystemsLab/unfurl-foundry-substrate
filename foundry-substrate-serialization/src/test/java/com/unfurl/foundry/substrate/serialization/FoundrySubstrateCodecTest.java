@@ -1,6 +1,8 @@
 package com.unfurl.foundry.substrate.serialization;
 
 import com.unfurl.foundry.substrate.agent.AgentDefinition;
+import com.unfurl.foundry.substrate.agent.AgentHarnessDefinition;
+import com.unfurl.foundry.substrate.agent.AgentHarnessLoopPolicy;
 import com.unfurl.foundry.substrate.agent.AgentPhase;
 import com.unfurl.foundry.substrate.skill.SkillDefinition;
 import com.unfurl.foundry.substrate.tool.ToolDefinition;
@@ -80,5 +82,21 @@ class FoundrySubstrateCodecTest {
 
         assertThat(reloaded.skillRefs()).containsExactly("common@1.0.0");
         assertThat(reloaded.phases().getFirst().skillRefs()).containsExactly("triage@1.0.0");
+    }
+
+    @Test
+    void roundTripsAgentHarnessDefinitionThroughJson() {
+        AgentDefinition agent = new AgentDefinition("authoring-agent", "1.0.0", Map.of(),
+                List.of(new AgentPhase("turn", null, null, List.of(), null, Map.of(), Map.of(), List.of(), 0)),
+                List.of(), Map.of(), null, List.of());
+        AgentHarnessDefinition harness = new AgentHarnessDefinition("authoring-harness", "1.0.0",
+                Map.of("owner", "foundry"), agent, new AgentHarnessLoopPolicy(4, 0, Map.of()));
+
+        AgentHarnessDefinition reloaded = codec.fromJson(codec.toJson(harness), AgentHarnessDefinition.class);
+
+        assertThat(reloaded.id()).isEqualTo("authoring-harness");
+        assertThat(reloaded.agent().id()).isEqualTo("authoring-agent");
+        assertThat(reloaded.loopPolicy().maxTurns()).isEqualTo(4);
+        assertThat(reloaded.metadata()).containsEntry("owner", "foundry");
     }
 }

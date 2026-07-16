@@ -3,6 +3,8 @@ package com.unfurl.foundry.substrate.offers;
 import com.unfurl.dcp.fault.FaultDeclaration;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AiOffersTest {
@@ -17,6 +19,17 @@ class AiOffersTest {
         assertThat(offers).allSatisfy(offer -> assertThat(offer.version()).isEqualTo("1.0.0"));
         assertThat(offers).filteredOn(com.unfurl.dcp.claim.Offer::metered)
                 .allSatisfy(offer -> assertThat(offer.costImplications()).isNotBlank());
+    }
+
+    @Test
+    void agentRunOfferDeclaresSimpleAndHarnessExecutionModes() {
+        var offer = AiOffers.standardAiOffers("1.0.0").getFirst();
+
+        assertThat(offer.capability()).isEqualTo(AiOffers.AGENT_RUN);
+        assertThat(offer.offerInterface().details())
+                .containsEntry(AiOffers.DETAIL_EXECUTION_MODES, List.of(AiOffers.MODE_SIMPLE, AiOffers.MODE_HARNESS))
+                .containsEntry(AiOffers.DETAIL_DEFAULT_EXECUTION_MODE, AiOffers.MODE_SIMPLE)
+                .containsKey(AiOffers.DETAIL_MODE_POLICIES);
     }
 
     @Test
