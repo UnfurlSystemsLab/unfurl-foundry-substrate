@@ -321,9 +321,16 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                             "Tool failed: " + call.toolName(), started);
                 }
                 emit(context, state, phase.id(), AgentEventType.TOOL_COMPLETED, Map.of("tool", call.toolName()));
+                String toolMessageContent;
+                try {
+                    toolMessageContent = toolResultContent(toolResult.output());
+                } catch (IllegalArgumentException ex) {
+                    return failedPhase(phase.id(), resolvedInput, messages, "TOOL_RESULT_SERIALIZATION_FAILED",
+                            ex.getMessage(), started);
+                }
                 messages.add(new Message(
                         com.unfurl.foundry.substrate.model.MessageRole.TOOL,
-                        String.valueOf(toolResult.output()),
+                        toolMessageContent,
                         call.id(),
                         Map.of("toolName", call.toolName())));
             }
@@ -522,6 +529,18 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 %s
                 """.formatted(toolSchemas)));
         return List.copyOf(requestMessages);
+    }
+
+/**
+ * Serializer: converts tool outputs into provider-neutral JSON TOOL messages
+ * instead of Java object text, preserving machine-readable tool result handoff.
+ */
+    private String toolResultContent(Map<String, Object> output) {
+        try {
+            return MAPPER.writeValueAsString(output == null ? Map.of() : output);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalArgumentException("Tool result output is not JSON serializable", ex);
+        }
     }
 
 /**
