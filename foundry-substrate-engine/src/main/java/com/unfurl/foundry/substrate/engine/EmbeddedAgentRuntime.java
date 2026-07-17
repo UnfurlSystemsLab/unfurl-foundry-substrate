@@ -289,7 +289,11 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         }
 
         List<ToolCall> toolCalls = new ArrayList<>();
-        ModelResponse response = callModel(state, phase, provider, messages, modelRef, context);
+        ModelCallOutcome firstCall = callModelOutcome(state, phase, provider, messages, modelRef, context, resolvedInput, started);
+        if (!firstCall.success()) {
+            return firstCall.failure();
+        }
+        ModelResponse response = firstCall.response();
         messages.add(response.message() == null ? Message.assistant("") : response.message());
 
         int iterations = 0;
@@ -345,7 +349,11 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 return mappedToolPhase.get();
             }
             iterations++;
-            response = callModel(state, phase, provider, messages, modelRef, context);
+            ModelCallOutcome nextCall = callModelOutcome(state, phase, provider, messages, modelRef, context, resolvedInput, started);
+            if (!nextCall.success()) {
+                return nextCall.failure();
+            }
+            response = nextCall.response();
             messages.add(response.message() == null ? Message.assistant("") : response.message());
         }
         if (response.hasToolCalls()) {
@@ -516,7 +524,34 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     }
 
 /**
- * Implements the callModel helper for this component, preserving the surrounding input, output, and edge-case contract.
+ * Boundary adapter: converts provider exceptions into structured agent phase failures so callers
+ * receive the substrate error model instead of a thrown SDK/runtime exception.
+ */
+    private ModelCallOutcome callModelOutcome(
+            State state,
+            AgentPhase phase,
+            ModelProvider provider,
+            List<Message> messages,
+            String modelRef,
+            ExecutionContext context,
+            Map<String, Object> resolvedInput,
+            Instant started) {
+        try {
+            return ModelCallOutcome.success(callModel(state, phase, provider, messages, modelRef, context));
+        } catch (RuntimeException ex) {
+            return ModelCallOutcome.failure(failedPhase(
+                    phase.id(),
+                    resolvedInput,
+                    messages,
+                    "MODEL_FAILED",
+                    safeModelFailureMessage(modelRef, ex),
+                    started));
+        }
+    }
+
+/**
+ * Provider call strategy: sends the normalized model request through the neutral provider port and
+ * records token/cost metadata only after the provider returns a usable response.
  */
     private ModelResponse callModel(State state, AgentPhase phase, ModelProvider provider, List<Message> messages,
                                     String modelRef, ExecutionContext context) {
@@ -533,6 +568,58 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         emit(context, state, phase.id(), AgentEventType.TOKENS_CONSUMED,
                 Map.of("promptTokens", prompt, "completionTokens", completion));
         return response;
+    }
+
+/**
+ * Diagnostic formatter: keeps provider failures actionable while redacting credentials and bounding
+ * the public error payload stored in run state or returned over DCP.
+ */
+    private String safeModelFailureMessage(String modelRef, RuntimeException ex) {
+        String detail = sanitizeDiagnostic(throwableMessages(ex));
+        if (detail.isBlank()) {
+            detail = ex.getClass().getSimpleName();
+        }
+        return "Model provider failed for ref " + modelRef + ": " + detail;
+    }
+
+/**
+ * Throwable walker: collects the exception chain so wrapped SDK errors expose the real provider
+ * reason without including stack traces, prompts, or raw model output.
+ */
+    private String throwableMessages(Throwable throwable) {
+        StringBuilder messages = new StringBuilder();
+        Throwable current = throwable;
+        int depth = 0;
+        while (current != null && depth < 6) {
+            String message = current.getMessage();
+            if (message == null || message.isBlank()) {
+                message = current.getClass().getSimpleName();
+            }
+            if (!messages.isEmpty()) {
+                messages.append(": ");
+            }
+            messages.append(message);
+            current = current.getCause();
+            depth++;
+        }
+        return messages.toString();
+    }
+
+/**
+ * Redaction helper: removes common credential shapes from provider diagnostics before those
+ * diagnostics become public run-state or DCP error messages.
+ */
+    private String sanitizeDiagnostic(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String redacted = value
+                .replaceAll("AIza[0-9A-Za-z_\\-]{20,}", "<redacted>")
+                .replaceAll("(?i)(authorization\\s*[:=]\\s*bearer\\s+)[^\\s,;]+", "$1<redacted>")
+                .replaceAll("(?i)(bearer\\s+)[A-Za-z0-9._~+/\\-=]+", "$1<redacted>")
+                .replaceAll("(?i)((api[_-]?key|apikey|token|secret|password)\\s*[:=]\\s*)[^\\s,;]+",
+                        "$1<redacted>");
+        return redacted.length() <= 1000 ? redacted : redacted.substring(0, 1000) + "...";
     }
 
 /**
@@ -961,6 +1048,21 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
 
     /** Value object: parsed equality or inequality route condition. */
     private record Comparison(String left, String right, boolean negated) {
+    }
+
+    /** Value object: model-provider call success or the structured phase failure replacing a provider exception. */
+    private record ModelCallOutcome(ModelResponse response, AgentPhaseState failure) {
+        static ModelCallOutcome success(ModelResponse response) {
+            return new ModelCallOutcome(response, null);
+        }
+
+        static ModelCallOutcome failure(AgentPhaseState failure) {
+            return new ModelCallOutcome(null, failure);
+        }
+
+        boolean success() {
+            return failure == null;
+        }
     }
 
     /** Value object: result of building a structured phase output or a structured mapping failure. */

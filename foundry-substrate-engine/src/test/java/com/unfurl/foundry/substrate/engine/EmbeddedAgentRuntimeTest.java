@@ -114,6 +114,38 @@ class EmbeddedAgentRuntimeTest {
         assertThat(executor.calls()).hasSize(1);
     }
 
+    /**
+     * Verifies provider exceptions become structured, sanitized MODEL_FAILED run state.
+     */
+    @Test
+    void convertsProviderExceptionIntoSanitizedModelFailure() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ThrowingModelProvider());
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry());
+        AgentDefinition agent = new AgentDefinition(
+                "agent",
+                "1",
+                Map.of(),
+                List.of(phase("first", Map.of("prompt", "call model"), List.of(), 0)),
+                List.of(),
+                Map.of(),
+                "model",
+                List.of()
+        );
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(run.errorCode()).isEqualTo("MODEL_FAILED");
+        assertThat(run.errorMessage())
+                .contains("Model provider failed for ref model")
+                .contains("Failed to generate content")
+                .contains("models/gemini-3.1-flash-lite")
+                .contains("<redacted>")
+                .doesNotContain("AIza");
+        assertThat(run.phases().get("first").errorCode()).isEqualTo("MODEL_FAILED");
+    }
+
     @Test
     void appendsToolResultsAsJsonToolMessages() {
         CapturingToolResultModelProvider model = new CapturingToolResultModelProvider();
@@ -387,6 +419,23 @@ class EmbeddedAgentRuntimeTest {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put(CostGuardrailContext.OUTER_BUDGET_REMAINING_USD, budget);
         return new ExecutionContext(null, null, List.of(), List.of(), null, null, Map.of(), metadata);
+    }
+
+    /**
+     * Test ModelProvider: throws a wrapped provider exception carrying model detail and a fake
+     * credential so the runtime's public failure redaction is exercised.
+     */
+    private static final class ThrowingModelProvider implements ModelProvider {
+        /**
+         * ModelProvider port implementation: simulates a provider SDK failure from a configured
+         * model binding without making a network call.
+         */
+        @Override
+        public ModelResponse complete(com.unfurl.foundry.substrate.model.ModelRequest request,
+                                      ExecutionContext context) {
+            throw new IllegalStateException("Failed to generate content",
+                    new IllegalArgumentException("models/gemini-3.1-flash-lite missing apiKey=AIzaSyFakeSecretValue1234567890"));
+        }
     }
 
     /**
