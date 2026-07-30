@@ -22,3 +22,12 @@ mvn -pl unfurl-foundry-substrate -am test
 - Tool, prompt, event, and model boundary contracts.
 - Compatibility with `unfurl-foundry` runtime consumers.
 
+## GitHub Packages
+
+This repository participates in the `UnfurlSystemsLab` private Maven package chain.
+
+- Publish: GitHub Actions deploys this repository's Maven artifacts to `https://maven.pkg.github.com/UnfurlSystemsLab/unfurl-foundry-substrate` using Maven server id `github`.
+- Consume: this repository resolves internal `com.unfurl...` artifacts through `https://maven.pkg.github.com/UnfurlSystemsLab/*`.
+- Credentials: local and CI Maven settings must provide server id `github`; use `GITHUB_TOKEN` for same-repository publish and `CI_REPO_TOKEN` or a PAT with `read:packages` for cross-repository private dependency reads.
+- Bootstrap order: publish `unfurl-substrate` and `dcp` before publishing `unfurl-foundry-substrate`.
+

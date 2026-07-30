@@ -43,6 +43,7 @@
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <github.packages.owner>UnfurlSystemsLab</github.packages.owner>
         <substrate.version>0.1.0-SNAPSHOT</substrate.version>
         <dcp.version>0.1.0-SNAPSHOT</dcp.version>
         <jackson.version>2.17.2</jackson.version>
@@ -53,6 +54,20 @@
         <jakarta.validation.version>3.1.0</jakarta.validation.version>
         <spring.ai.version>1.1.8</spring.ai.version>
     </properties>
+
+    <repositories>
+        <repository>
+            <id>github</id>
+            <name>GitHub ${github.packages.owner} Apache Maven Packages</name>
+            <url>https://maven.pkg.github.com/${github.packages.owner}/*</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
 
     <dependencyManagement>
         <dependencies>
