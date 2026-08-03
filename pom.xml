@@ -43,7 +43,7 @@
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <github.packages.owner>UnfurlSystemsLab</github.packages.owner>
+        <github.packages.owner>unfurlsystemslab</github.packages.owner>
         <substrate.version>0.1.0-SNAPSHOT</substrate.version>
         <dcp.version>0.1.0-SNAPSHOT</dcp.version>
         <jackson.version>2.17.2</jackson.version>
