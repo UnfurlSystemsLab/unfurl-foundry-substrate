@@ -54,6 +54,8 @@ public final class ToolInvocation implements ContractInvocable {
                 new ToolCallRequest(invocation.correlationId(), toolName, invocation.input(), invocation.metadata()),
                 context);
         if (!result.success()) {
+            // Adapter boundary: the current DCP compatibility envelope carries code/message;
+            // the canonical category, retry, partial-output, and provenance data remain on result.failure().
             return ContractInvocationResult.failure(result.errorCode(), result.errorMessage());
         }
         return ContractInvocationResult.success(result.output());

@@ -4,6 +4,8 @@ import com.unfurl.foundry.substrate.agent.AgentDefinition;
 import com.unfurl.foundry.substrate.agent.AgentPhase;
 import com.unfurl.foundry.substrate.agent.BudgetPolicy;
 import com.unfurl.foundry.substrate.guardrail.CostGuardrailContext;
+import com.unfurl.foundry.substrate.failure.FailureCategory;
+import com.unfurl.foundry.substrate.failure.StructuredFailure;
 import com.unfurl.foundry.substrate.model.Message;
 import com.unfurl.foundry.substrate.model.ModelResponse;
 import com.unfurl.foundry.substrate.model.ModelToolCall;
@@ -11,6 +13,7 @@ import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.model.ModelUsage;
 import com.unfurl.foundry.substrate.model.MessageRole;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
+import com.unfurl.foundry.substrate.ports.ToolCallResult;
 import com.unfurl.foundry.substrate.runstate.AgentPhaseStatus;
 import com.unfurl.foundry.substrate.runstate.AgentRunState;
 import com.unfurl.foundry.substrate.runstate.AgentRunStatus;
@@ -84,6 +87,40 @@ class EmbeddedAgentRuntimeTest {
         assertThat(run.status()).isEqualTo(AgentRunStatus.FAILED);
         assertThat(run.errorCode()).isEqualTo("TOOL_NOT_ALLOWED");
         assertThat(executor.calls()).isEmpty();
+    }
+
+    /**
+     * Verifies structured tool failures retain their stable code, partial output, and call evidence.
+     */
+    @Test
+    void preservesStructuredToolFailureAndPartialOutput() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(
+                        response("call tool", List.of(new ModelToolCall("call-1", "lookup", Map.of())))
+                )));
+        DefaultToolRegistry tools = new DefaultToolRegistry();
+        tools.register("lookup", (request, context) -> ToolCallResult.failure(new StructuredFailure(
+                "LOOKUP_RATE_LIMITED",
+                FailureCategory.RATE_LIMIT,
+                true,
+                500L,
+                "lookup capacity exhausted",
+                Map.of("accepted", 2),
+                Map.of("limit", 2),
+                Map.of("tool", "lookup"))));
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, tools);
+        AgentDefinition agent = new AgentDefinition(
+                "agent", "1", Map.of(),
+                List.of(phase("first", Map.of("prompt", "lookup"), List.of("lookup"), 1)),
+                List.of(), Map.of(), "model", List.of("lookup"));
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(run.errorCode()).isEqualTo("LOOKUP_RATE_LIMITED");
+        assertThat(run.phases().get("first").output()).containsEntry("accepted", 2);
+        assertThat(run.phases().get("first").toolCalls()).singleElement()
+                .satisfies(call -> assertThat(call.result()).containsEntry("accepted", 2));
     }
 
     @Test

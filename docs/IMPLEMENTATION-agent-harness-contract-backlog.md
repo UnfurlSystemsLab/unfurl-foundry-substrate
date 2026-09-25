@@ -1,6 +1,6 @@
 # Implementation Backlog: Graph-Backed Agent Harness Contracts
 
-**Status:** Approved architecture translated into implementation slices. Slice 1 is implemented; Slices 2-7 remain planned.
+**Status:** Approved architecture translated into implementation slices. Slices 1-2 are implemented; Slices 3-7 remain planned.
 **Scope:** `unfurl-foundry-substrate`, `unfurl-foundry`, and the narrow `unfurl-flow` `agentRef` integration.
 **Governing design:** `HLD-unfurl-foundry-substrate.md`, `LLD-unfurl-foundry-substrate-java.md`, and the repository build specs.
 
@@ -40,6 +40,8 @@
 - `mvn test` passes in substrate and Foundry.
 
 ## Slice 2: Structured Failures And Empty Success
+
+**Status:** Implemented and verified in `unfurl-foundry-substrate` and `unfurl-foundry`.
 
 **Goal:** give agents actionable, sanitized failures without confusing an empty result with an error.
 

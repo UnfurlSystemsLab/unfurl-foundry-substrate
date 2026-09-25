@@ -321,9 +321,13 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 toolCalls.add(new ToolCall(call.id(), call.toolName(), call.arguments(),
                         toolResult.output(), toolResult.errorCode(), toolResult.errorMessage(), toolStart, Instant.now()));
                 if (!toolResult.success()) {
-                    emit(context, state, phase.id(), AgentEventType.TOOL_FAILED, Map.of("tool", call.toolName()));
-                    return failedPhase(phase.id(), resolvedInput, messages, "TOOL_FAILED",
-                            "Tool failed: " + call.toolName(), started);
+                    emit(context, state, phase.id(), AgentEventType.TOOL_FAILED, Map.of(
+                            "tool", call.toolName(),
+                            "errorCode", toolResult.errorCode(),
+                            "category", toolResult.failure().category().name(),
+                            "retryable", toolResult.failure().retryable()));
+                    return failedToolPhase(phase.id(), resolvedInput, messages, toolCalls, toolResult,
+                            started);
                 }
                 emit(context, state, phase.id(), AgentEventType.TOOL_COMPLETED, Map.of("tool", call.toolName()));
                 String toolMessageContent;
@@ -1023,6 +1027,30 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                                         String errorCode, String errorMessage, Instant started) {
         return new AgentPhaseState(phaseId, AgentPhaseStatus.FAILED, input, List.copyOf(messages), List.of(),
                 Map.of(), errorCode, errorMessage, started, Instant.now());
+    }
+
+    /**
+     * Failure projector: preserves completed tool-call evidence and canonical partial output when a
+     * tool reports an expected structured failure.
+     */
+    private AgentPhaseState failedToolPhase(
+            String phaseId,
+            Map<String, Object> input,
+            List<Message> messages,
+            List<ToolCall> toolCalls,
+            ToolCallResult result,
+            Instant started) {
+        return new AgentPhaseState(
+                phaseId,
+                AgentPhaseStatus.FAILED,
+                input,
+                List.copyOf(messages),
+                List.copyOf(toolCalls),
+                result.failure().partialOutput(),
+                result.failure().code(),
+                result.failure().message(),
+                started,
+                Instant.now());
     }
 
     // --- run-state assembly ---

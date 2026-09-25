@@ -36,6 +36,8 @@ public final class ToolExecutorNodeExecutor implements NodeExecutor {
         Map<String, Object> arguments = mapValue(request.input().get("arguments"), request.input());
         ToolCallResult result = executor.execute(new ToolCallRequest(callId, toolName, arguments, request.metadata()), context);
         if (!result.success()) {
+            // Adapter boundary: NodeExecutionResult retains the compatibility aliases while
+            // ToolCallResult.failure() remains the canonical structured representation.
             return NodeExecutionResult.failed(result.errorCode(), result.errorMessage());
         }
         return NodeExecutionResult.completed(result.output());

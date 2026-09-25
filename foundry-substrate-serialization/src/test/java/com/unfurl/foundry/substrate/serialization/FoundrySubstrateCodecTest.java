@@ -4,6 +4,8 @@ import com.unfurl.foundry.substrate.agent.AgentDefinition;
 import com.unfurl.foundry.substrate.agent.AgentHarnessDefinition;
 import com.unfurl.foundry.substrate.agent.AgentHarnessLoopPolicy;
 import com.unfurl.foundry.substrate.agent.AgentPhase;
+import com.unfurl.foundry.substrate.failure.FailureCategory;
+import com.unfurl.foundry.substrate.failure.StructuredFailure;
 import com.unfurl.foundry.substrate.skill.SkillDefinition;
 import com.unfurl.foundry.substrate.model.Message;
 import com.unfurl.foundry.substrate.model.ModelResponse;
@@ -117,5 +119,19 @@ class FoundrySubstrateCodecTest {
         assertThat(json).contains("\"finishReason\"", "\"outcome\"");
         assertThat(reloaded.outcome()).isEqualTo(ModelTurnOutcome.COMPLETED);
         assertThat(reloaded.finishReason()).isEqualTo("end_turn");
+    }
+
+    /**
+     * Public-record compatibility: round-trips retry policy, partial output, details, and provenance.
+     */
+    @Test
+    void roundTripsStructuredFailure() {
+        StructuredFailure failure = new StructuredFailure(
+                "TOOL_RATE_LIMITED", FailureCategory.RATE_LIMIT, true, 500L, "retry later",
+                Map.of("accepted", 1), Map.of("limit", 2), Map.of("tool", "catalog"));
+
+        StructuredFailure reloaded = codec.fromYaml(codec.toYaml(failure), StructuredFailure.class);
+
+        assertThat(reloaded).isEqualTo(failure);
     }
 }
