@@ -28,6 +28,10 @@
             <groupId>com.unfurl.foundry.substrate</groupId>
             <artifactId>foundry-substrate-ports</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
 
         <!-- Spring AI primitives. Compile-time only against the model
              interfaces and vector-store API; provider starters

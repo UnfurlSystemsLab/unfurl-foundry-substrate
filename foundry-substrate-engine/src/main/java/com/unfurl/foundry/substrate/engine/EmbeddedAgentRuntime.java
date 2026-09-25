@@ -18,6 +18,7 @@ import com.unfurl.foundry.substrate.model.Message;
 import com.unfurl.foundry.substrate.model.ModelRequest;
 import com.unfurl.foundry.substrate.model.ModelResponse;
 import com.unfurl.foundry.substrate.model.ModelToolCall;
+import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.ports.AgentEventSink;
 import com.unfurl.foundry.substrate.ports.AgentRuntime;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
@@ -535,9 +536,21 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             String modelRef,
             ExecutionContext context,
             Map<String, Object> resolvedInput,
-            Instant started) {
+        Instant started) {
         try {
-            return ModelCallOutcome.success(callModel(state, phase, provider, messages, modelRef, context));
+            ModelResponse response = callModel(state, phase, provider, messages, modelRef, context);
+            return switch (response.outcome()) {
+                case COMPLETED, TOOL_REQUESTED -> ModelCallOutcome.success(response);
+                case MAX_OUTPUT_REACHED -> modelOutcomeFailure(
+                        phase, resolvedInput, messages, "MODEL_MAX_OUTPUT_REACHED",
+                        "Model reached its output limit before completing the turn", started);
+                case CONTENT_FILTERED -> modelOutcomeFailure(
+                        phase, resolvedInput, messages, "MODEL_CONTENT_FILTERED",
+                        "Model response was filtered by the configured provider", started);
+                case PROVIDER_ERROR -> modelOutcomeFailure(
+                        phase, resolvedInput, messages, "MODEL_PROVIDER_ERROR",
+                        "Model provider returned an unrecognized or error completion outcome", started);
+            };
         } catch (RuntimeException ex) {
             return ModelCallOutcome.failure(failedPhase(
                     phase.id(),
@@ -547,6 +560,21 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                     safeModelFailureMessage(modelRef, ex),
                     started));
         }
+    }
+
+    /**
+     * Factory: converts a non-successful neutral model outcome into the same structured phase failure
+     * used for provider exceptions, keeping provider-native reason strings out of runtime branching.
+     */
+    private ModelCallOutcome modelOutcomeFailure(
+            AgentPhase phase,
+            Map<String, Object> resolvedInput,
+            List<Message> messages,
+            String code,
+            String message,
+            Instant started) {
+        return ModelCallOutcome.failure(failedPhase(
+                phase.id(), resolvedInput, messages, code, message, started));
     }
 
 /**
@@ -688,6 +716,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 response.message(),
                 calls,
                 response.finishReason(),
+                ModelTurnOutcome.TOOL_REQUESTED,
                 response.usage(),
                 response.metadata(),
                 response.providerName(),

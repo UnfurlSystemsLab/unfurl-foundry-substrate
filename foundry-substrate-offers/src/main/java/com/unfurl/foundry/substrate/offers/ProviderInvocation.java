@@ -65,6 +65,7 @@ public final class ProviderInvocation implements ContractInvocable {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("message", response.message() == null ? "" : response.message().content());
         output.put("finishReason", response.finishReason());
+        output.put("outcome", response.outcome().name());
         output.put("usage", response.usage());
         output.put("providerName", response.providerName());
         output.put("estimatedCostUsd", response.estimatedCostUsd());

@@ -12,6 +12,7 @@ public record ModelResponse(
         Message message,
         List<ModelToolCall> toolCalls,
         String finishReason,
+        ModelTurnOutcome outcome,
         ModelUsage usage,
         Map<String, Object> metadata,
         String providerName,
@@ -27,7 +28,23 @@ public record ModelResponse(
             ModelUsage usage,
             Map<String, Object> metadata
     ) {
-        this(message, toolCalls, finishReason, usage, metadata, providerNameFrom(metadata), estimatedCostUsdFrom(metadata));
+        this(message, toolCalls, finishReason, null, usage, metadata, providerNameFrom(metadata), estimatedCostUsdFrom(metadata));
+    }
+
+    /**
+     * Compatibility constructor: preserves the former full record signature while deriving the neutral
+     * outcome from the legacy reason and tool-call list.
+     */
+    public ModelResponse(
+            Message message,
+            List<ModelToolCall> toolCalls,
+            String finishReason,
+            ModelUsage usage,
+            Map<String, Object> metadata,
+            String providerName,
+            BigDecimal estimatedCostUsd
+    ) {
+        this(message, toolCalls, finishReason, null, usage, metadata, providerName, estimatedCostUsd);
     }
 
 /**
@@ -35,6 +52,13 @@ public record ModelResponse(
  */
     public ModelResponse {
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+        outcome = outcome == null ? ModelTurnOutcome.fromLegacy(finishReason, !toolCalls.isEmpty()) : outcome;
+        if (!toolCalls.isEmpty() && outcome != ModelTurnOutcome.TOOL_REQUESTED) {
+            throw new IllegalArgumentException("Model responses with tool calls require TOOL_REQUESTED outcome");
+        }
+        if (toolCalls.isEmpty() && outcome == ModelTurnOutcome.TOOL_REQUESTED) {
+            throw new IllegalArgumentException("TOOL_REQUESTED outcome requires at least one tool call");
+        }
         usage = usage == null ? ModelUsage.zero() : usage;
         metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
         estimatedCostUsd = estimatedCostUsd == null ? BigDecimal.ZERO : estimatedCostUsd;

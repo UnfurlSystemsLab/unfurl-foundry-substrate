@@ -4,6 +4,7 @@ import com.unfurl.foundry.substrate.model.Message;
 import com.unfurl.foundry.substrate.model.MessageRole;
 import com.unfurl.foundry.substrate.model.ModelRequest;
 import com.unfurl.foundry.substrate.model.ModelResponse;
+import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -116,6 +117,7 @@ class SpringAiModelProviderTest {
         assertThat(response.usage().promptTokens()).isEqualTo(11);
         assertThat(response.usage().completionTokens()).isEqualTo(22);
         assertThat(response.usage().totalTokens()).isEqualTo(33);
+        assertThat(response.outcome()).isEqualTo(ModelTurnOutcome.COMPLETED);
     }
 
     @Test
@@ -134,5 +136,36 @@ class SpringAiModelProviderTest {
                 null);
 
         assertThat(response.usage().totalTokens()).isZero();
+    }
+
+    /** Adapter mapping: Spring AI native tool calls become neutral Foundry tool requests. */
+    @Test
+    void projectsSpringToolCallsIntoNeutralResponse() {
+        AssistantMessage assistant = AssistantMessage.builder()
+                .content("")
+                .toolCalls(List.of(new AssistantMessage.ToolCall(
+                        "call-1", "function", "lookup", "{\"id\":42}")))
+                .build();
+        ChatModel chatModel = prompt -> new ChatResponse(List.of(new Generation(assistant)));
+
+        ModelResponse response = new SpringAiModelProvider(chatModel).complete(
+                new ModelRequest(List.of(Message.user("lookup")), "test-model", Map.of(), List.of(), Map.of()),
+                null);
+
+        assertThat(response.outcome()).isEqualTo(ModelTurnOutcome.TOOL_REQUESTED);
+        assertThat(response.toolCalls()).singleElement().satisfies(call -> {
+            assertThat(call.id()).isEqualTo("call-1");
+            assertThat(call.toolName()).isEqualTo("lookup");
+            assertThat(call.arguments()).containsEntry("id", 42);
+        });
+    }
+
+    /** Fail-closed mapping: a new non-empty Spring/provider reason is not assumed successful. */
+    @Test
+    void mapsUnknownFinishReasonToProviderError() {
+        assertThat(SpringAiModelProvider.outcomeForFinishReason("NEW_REASON", false))
+                .isEqualTo(ModelTurnOutcome.PROVIDER_ERROR);
+        assertThat(SpringAiModelProvider.outcomeForFinishReason("TOOL_CALLS", true))
+                .isEqualTo(ModelTurnOutcome.TOOL_REQUESTED);
     }
 }

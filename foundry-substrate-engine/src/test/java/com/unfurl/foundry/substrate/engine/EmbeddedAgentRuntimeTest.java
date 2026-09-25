@@ -7,6 +7,7 @@ import com.unfurl.foundry.substrate.guardrail.CostGuardrailContext;
 import com.unfurl.foundry.substrate.model.Message;
 import com.unfurl.foundry.substrate.model.ModelResponse;
 import com.unfurl.foundry.substrate.model.ModelToolCall;
+import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.model.ModelUsage;
 import com.unfurl.foundry.substrate.model.MessageRole;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
@@ -144,6 +145,16 @@ class EmbeddedAgentRuntimeTest {
                 .contains("<redacted>")
                 .doesNotContain("AIza");
         assertThat(run.phases().get("first").errorCode()).isEqualTo("MODEL_FAILED");
+    }
+
+    /**
+     * Verifies provider-neutral non-success outcomes become distinct structured runtime failures.
+     */
+    @Test
+    void mapsNonSuccessModelOutcomesToStableFailureCodes() {
+        assertModelOutcomeFailure(ModelTurnOutcome.MAX_OUTPUT_REACHED, "MODEL_MAX_OUTPUT_REACHED");
+        assertModelOutcomeFailure(ModelTurnOutcome.CONTENT_FILTERED, "MODEL_CONTENT_FILTERED");
+        assertModelOutcomeFailure(ModelTurnOutcome.PROVIDER_ERROR, "MODEL_PROVIDER_ERROR");
     }
 
     @Test
@@ -398,6 +409,39 @@ class EmbeddedAgentRuntimeTest {
     private ModelResponse response(String content, List<ModelToolCall> toolCalls, BigDecimal estimatedCostUsd) {
         return new ModelResponse(Message.assistant(content), toolCalls, "stop", new ModelUsage(1, 1),
                 Map.of("estimatedCostUsd", estimatedCostUsd));
+    }
+
+    /**
+     * Test assertion helper: executes one terminal provider outcome and verifies its public failure code.
+     */
+    private void assertModelOutcomeFailure(ModelTurnOutcome outcome, String expectedErrorCode) {
+        ModelResponse response = new ModelResponse(
+                Message.assistant("provider did not complete"),
+                List.of(),
+                outcome.name(),
+                outcome,
+                ModelUsage.zero(),
+                Map.of(),
+                "test-provider",
+                BigDecimal.ZERO);
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(response)));
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry());
+        AgentDefinition agent = new AgentDefinition(
+                "agent",
+                "1",
+                Map.of(),
+                List.of(phase("first", Map.of("prompt", "call model"), List.of(), 0)),
+                List.of(),
+                Map.of(),
+                "model",
+                List.of());
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(run.errorCode()).isEqualTo(expectedErrorCode);
+        assertThat(run.phases().get("first").errorCode()).isEqualTo(expectedErrorCode);
     }
 
     private AgentDefinition twoPhaseAgent(BudgetPolicy budgetPolicy) {

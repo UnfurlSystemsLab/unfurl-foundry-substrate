@@ -98,7 +98,9 @@ foundry-substrate-domain
     com.unfurl.foundry.substrate.runstate
   contains:
     AgentDefinition, AgentPhase, ToolDefinition, Message, PromptTemplate,
-    ModelRequest/ModelResponse, RagQuery/RagResult/Chunk, EmbeddingRequest/EmbeddingResult,
+    ModelRequest/ModelResponse, ModelTurnOutcome, RagQuery/RagResult/Chunk,
+    EmbeddingRequest/EmbeddingResult, ContextPolicy, AgentTerminalEnvelope,
+    StructuredFailure, ValidationResult, AgentDelegationRequest/Result,
     AgentHarnessDefinition, AgentHarnessLoopPolicy,
     AgentRunState, AgentHarnessRunState, AgentHarnessObservation,
     AgentPhaseState, ToolCall, CostAccounting, statuses, identities,
@@ -122,7 +124,8 @@ foundry-substrate-ports
   contains:
     ModelProvider, EmbeddingProvider, VectorStore, ToolExecutor, ToolRegistry,
     RagRetriever, AgentRuntime, ProviderRegistry, CostGuardrail, PermissionBridge,
-    AgentHarnessRuntime,
+    AgentHarnessRuntime, ToolCallInterceptor, SemanticValidator, AgentDelegate,
+    ContextResourceProvider,
     NodeExecutor adapters for agent.run/tool.call/rag.search/provider.call,
     no-op/default port types
   may depend on:
@@ -226,6 +229,7 @@ Core domain types live under `com.unfurl.foundry.substrate.*`. Agent topology re
 - Fields: `id`, `version`, `metadata`, `phases`, `edges`, `inputSchema`, `defaultModelRef`, `toolRefs`, `budgetPolicy`.
 - A multi-phase agent. `phases` are keyed by unique id after validation; `edges` are conditional, reusing the substrate `EdgeDefinition`/`ConditionDefinition` shapes.
 - Topology is static. Runtime data affects routing only through conditional edges between phases.
+- The graph is the canonical agent intermediate representation. A chat-like or coding-agent API is a harness over this definition, not an alternative definition format.
 - `budgetPolicy` is the agent-owned execution ceiling carried with a resolved `agentRef`. It is the source of truth for agent-specific cost caps: default/max USD budget and optional token ceilings (`maxPromptTokens`, `maxCompletionTokens`, `maxTotalTokens`). A host may provide a stricter outer run envelope, but it must not invent a looser agent cap.
 
 `BudgetPolicy`
@@ -252,6 +256,8 @@ Harness terminal output convention:
 - `kind: gap` or a non-empty `unmet` list: stop in `GAP`.
 - any other completed agent output: stop in `COMPLETED`.
 
+The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`, `questions`, `handoff`, `confidence`, `provenance`, `error`, and `metering`. During migration the embedded harness continues accepting the existing `kind` convention and normalizes it to the envelope. Provider-native stop reasons never appear in this contract.
+
 `AgentHarnessRunState` and `AgentHarnessObservation`
 
 - `AgentHarnessRunState`: harness run id, harness id/version, tenant, status, current turn, original input, latest input, observations, output, failure details, timestamps.
@@ -277,7 +283,8 @@ Harness terminal output convention:
 `ModelRequest` and `ModelResponse`
 
 - `ModelRequest` fields: `messages`, `modelRef`, `parameters` (temperature, maxTokens, …), `toolSchemas`, `metadata`.
-- `ModelResponse` fields: `message`, `toolCalls`, `finishReason`, `usage` (prompt/completion tokens), `metadata`, `providerName`, `estimatedCostUsd`.
+- `ModelResponse` fields: `message`, `toolCalls`, `outcome`, `usage` (prompt/completion tokens), `metadata`, `providerName`, `estimatedCostUsd`.
+- `ModelTurnOutcome`: `TOOL_REQUESTED`, `COMPLETED`, `MAX_OUTPUT_REACHED`, `CONTENT_FILTERED`, `PROVIDER_ERROR`. Provider adapters map Anthropic, OpenAI, Spring AI, and local-provider completion reasons into this closed neutral vocabulary. The legacy `finishReason` field is read only during a compatibility migration and must not drive new runtime branching.
 - `providerName` and `estimatedCostUsd` are typed fields. The legacy metadata keys `providerName`, `estimatedCostUsd`, and `costUsd` are accepted as a compatibility fallback, but providers should set the typed fields.
 - These are neutral shapes. No provider-specific fields; adapters map to/from concrete SDK types outside the substrate.
 - Provider adapters may normalize the neutral message list to satisfy provider SDK constraints without changing Foundry semantics. For example, an adapter may merge multiple `SYSTEM` messages into one provider system instruction while preserving `USER`, `ASSISTANT`, and `TOOL` conversation messages in order.
@@ -299,6 +306,21 @@ Harness terminal output convention:
 - `ToolCall`: call id, tool name, arguments, result or error, timestamps.
 - `CostAccounting`: accumulated prompt/completion tokens, per-provider/model token tallies, `estimatedCostUsd`, and attribution dimensions (`tenantId`, `runId`, `agentId`, `phaseId`, `modelRef`, `providerName`, `contractId`, `correlationId`). Accounting only — capture, not enforcement (that is the `CostGuardrail` port) and not aggregation/persistence/billing (that is the reporting layer in `unfurl-foundry`). The attribution dimensions exist so a reporting layer above can roll spend up by tenant, agent, model, or contract without the substrate doing any aggregation.
 - Must never require business payloads to be logged; outputs are held in run state for execution only.
+
+`ContextPolicy`
+
+- Fields: history selector, pinned-fact refs, summary refs, tool-result retention policy, provenance retention policy, token allocation, and metadata.
+- Context assembly is explicit and reproducible from invocation input, prior structured outputs, selected history, summaries, and retrieved material. No port may silently read or write global model memory.
+
+`StructuredFailure`
+
+- Fields: `code`, `category`, `retryable`, optional `retryAfterMillis`, sanitized message, partial output, details, and provenance.
+- Categories distinguish validation, authorization, not-found, business-rule, rate-limit, transient, provider, and internal failures. A successful empty result remains success with an empty output/count; it is never represented as a retryable failure.
+
+`AgentDelegationRequest` and `AgentDelegationResult`
+
+- The request contains pinned `agentRef`, objective, explicit context projection, expected output schema, budget envelope, permission scope, and metadata.
+- The result contains the child's terminal envelope and provenance. A child receives no implicit parent transcript or sibling output.
 
 Statuses:
 
@@ -363,9 +385,34 @@ public interface CostGuardrail {
 public interface PermissionBridge {
     PermissionDecision check(String toolName, Map<String, Object> arguments, ExecutionContext context);
 }
+
+public interface ToolCallInterceptor {
+    ToolCallDecision before(ToolCallRequest request, ExecutionContext context);
+    ToolCallResult after(ToolCallRequest request, ToolCallResult result, ExecutionContext context);
+}
+
+public interface SemanticValidator {
+    ValidationResult validate(Object value, Map<String, Object> source, ExecutionContext context);
+}
+
+public interface AgentDelegate {
+    AgentDelegationResult invoke(AgentDelegationRequest request, ExecutionContext context);
+}
+
+public interface ContextResourceProvider {
+    ContextResource read(String resourceRef, ExecutionContext context);
+}
 ```
 
 Result types are immutable records or sealed interfaces. Do not throw for expected model, tool, retrieval, guardrail, or permission failures; return structured results and let the runner convert them into failed run state. `ProviderRegistry`, `ToolRegistry`, and the credential/loader behind them are *ports*: the per-tenant store, encryption, and concrete adapters are implemented in `unfurl-foundry`.
+
+`ToolCallInterceptor` uses Chain of Responsibility semantics. Interceptors run in stable configured order before a tool is resolved/executed and in reverse order after a result is returned. A before decision may allow, deny, require approval, or replace arguments with a normalized map; it may never add permissions. An after decision may normalize, redact, or annotate a result but may not convert a policy denial into success. Foundry supplies concrete policy, approval, audit, and normalization interceptors; the substrate supplies the contract and an empty no-op chain.
+
+`SemanticValidator` is separate from JSON-schema validation. Schema validation establishes shape before or after projection; semantic validation checks claims such as totals, ranges, source grounding, and domain invariants. A phase may attach a bounded correction policy that feeds specific validation failures into another model turn. Exhaustion returns `VALIDATION_FAILED` or an escalation envelope, never an unbounded retry loop.
+
+`AgentDelegate` is the Strategy port for coordinator/subagent invocation. The embedded strategy is sequential. Foundry may provide a concurrent and durable implementation, but must enforce explicit context projection, pinned references, lower-of budgets, permission intersection, and structured child failure propagation.
+
+`ContextResourceProvider` is the read-only resource boundary for files, documents, schemas, and MCP resources selected into context. A resource has stable identity, media type, content or content reference, provenance, and metadata. Resource discovery, transport, credentials, caching, and persistence remain adapter/product responsibilities.
 
 `CostGuardrail` evaluates the current `CostAccounting` against the resolved `AgentDefinition.budgetPolicy` and any outer execution envelope supplied by the caller. For flow-hosted `agentRef` invocations, flow passes the remaining workflow-run budget in `ExecutionContext.metadata()["outerBudgetRemainingUsd"]`; foundry/foundry-substrate guardrails apply the stricter of the agent cap and that outer value. The substrate shape remains a decision port only: it does not persist quota state or aggregate spend.
 
@@ -454,13 +501,14 @@ Start flow:
 - If the phase declares a RAG query, call `RagRetriever`, emit `RAG_RETRIEVED`, and fold results into the prompt.
 - Check `CostGuardrail`; the runner attaches the resolved `AgentDefinition.budgetPolicy` to `ExecutionContext` before the check. On a tripped budget, emit `GUARDRAIL_TRIPPED` and fail the phase.
 - Call `ModelProvider.complete`, emit `MODEL_INVOKED` and `TOKENS_CONSUMED`, update `CostAccounting` with prompt/completion tokens, provider/model attribution, and `ModelResponse.estimatedCostUsd` (with legacy metadata fallback). The request includes the phase's allowed tool names as neutral `toolSchemas` so provider adapters with native tool/function calling can expose the same Foundry `ToolRegistry` surface.
-- While the response contains tool calls and `maxToolIterations` is not exceeded: check `PermissionBridge`, resolve the tool via `ToolRegistry`, execute, emit `TOOL_CALLED`/`TOOL_COMPLETED`, append the tool result message, and call the model again. Tool result messages must serialize `ToolCallResult.output` as JSON, not Java object text, so every provider adapter receives the same machine-readable result shape. If the phase declares an `outputMapping` and that mapping fully resolves after the tool call set, the runtime may complete the phase from the mapped tool outputs without a second model turn; this is the deterministic path for execution phases whose terminal response is entirely grounded in tool results.
+- While the response contains tool calls and `maxToolIterations` is not exceeded: run the configured `ToolCallInterceptor` chain, check `PermissionBridge`, resolve the tool via `ToolRegistry`, execute, run after-call interceptors, emit `TOOL_CALLED`/`TOOL_COMPLETED`, append the tool result message, and call the model again. Tool result messages must serialize `ToolCallResult.output` as JSON, not Java object text, so every provider adapter receives the same machine-readable result shape. If the phase declares an `outputMapping` and that mapping fully resolves after the tool call set, the runtime may complete the phase from the mapped tool outputs without a second model turn; this is the deterministic path for execution phases whose terminal response is entirely grounded in tool results. Expected failures are returned as `StructuredFailure`; `retryable` is policy input, not permission to retry without a configured bound.
   Providers without native tool/function-calling support may return a structured JSON object containing a top-level `toolCalls` array. The runtime treats that as a provider-neutral tool-call envelope only after applying the same allow-list, permission, registry, iteration, and error checks used for native `ModelResponse.toolCalls`. A final `execution` response must be grounded in tool result messages or phase `outputMapping`; model text alone is not a substitute for tool execution.
    - On success, build structured phase output, mark `COMPLETED`, persist, emit `PHASE_COMPLETED`.
      The raw assistant content is always available as `output.content`. When the content is a JSON object, the
      runner exposes it as `output.json` and makes top-level fields available to `AgentPhase.outputMapping`. A phase
      with `outputMapping` resolves mappings against `$.output.content`, `$.output.json`, `$.output.<field>`, and
      `$.tools.<callId>.output`; unresolved mappings fail the phase with `OUTPUT_MAPPING_UNRESOLVED`.
+     If an output schema is declared, validate the mapped output structurally and then invoke the configured `SemanticValidator`. A failed semantic validation may consume one bounded correction attempt with the validator's specific feedback; policy exhaustion produces a structured failure or escalation.
    - Evaluate conditional edges; mark non-matching branch phases `SKIPPED`; continue scanning pending phases in deterministic order. Conditions may use truthiness on a resolved reference or the small scalar equality subset `<reference> == '<literal>'` / `<reference> != '<literal>'`, which is sufficient for governed phase routing such as `kind == 'continue'`.
    - On failure, mark phase and run `FAILED`, persist, emit failure events, and stop.
 6. If all reachable phases are `COMPLETED` or `SKIPPED`, mark the run `COMPLETED`, persist, emit `AGENT_COMPLETED`.
@@ -483,6 +531,7 @@ Constraints:
 - Phase topology is static and validated before execution.
 - Execution is sequential only; no parallel phases, durability, or retries.
 - The tool-call loop within a phase is bounded by `maxToolIterations`.
+- Provider branching uses `ModelTurnOutcome`, never string matching against assistant text or a provider-native stop reason.
 - No concrete model/embedding/vector calls happen in the substrate; they go through ports whose concrete bindings are supplied by foundry/adapters.
 
 `EmbeddedAgentHarnessRuntime` is a sequential in-process control loop around `AgentRuntime`.
@@ -554,6 +603,8 @@ Error model:
 - Top-level error categories/codes: `VALIDATION`, `POLICY_DENIED`, `RESOLUTION`, `CONDITION`, `MODEL_FAILED`, `TOOL_FAILED`, `RETRIEVAL_FAILED`, `PROVIDER_MISSING`, `TOOL_MISSING`, `TOOL_NOT_ALLOWED`, `MAX_TOOL_ITERATIONS_EXCEEDED`, `SCHEDULE_STALLED`, `AGENT_NOT_COMPLETED`, `GUARDRAIL_TRIPPED`, `PERMISSION_DENIED`, `COMPOSITION`, `RUN_NOT_FOUND`, `CANCELLED`.
 - Errors include location fields where applicable: agent id, phase id, edge id, tool name, model ref, reference expression, condition expression, run id, wait id, iteration index.
 - Runtime exceptions are reserved for programmer errors and are wrapped at runner boundaries into structured run failures.
+- Tool and delegation failures use `StructuredFailure`; `retryable=false` is terminal for automated retry, while `retryable=true` is eligible only under a configured retry policy and deadline.
+- Empty success is represented as success with empty output or a zero count, not `NOT_FOUND` or `TOOL_FAILED`.
 
 Serialization:
 
@@ -607,6 +658,10 @@ Unit tests:
 - Tool-call loop bounding by `maxToolIterations`.
 - Cost accounting accumulation and guardrail decision plumbing.
 - Runtime success, model/tool/retrieval failure, missing provider/tool, conditional branch skip, wait and resume, cancellation, context propagation, event sequence.
+- Provider-native finish-reason mapping into every `ModelTurnOutcome` and provider-neutral termination behavior.
+- Interceptor ordering, prerequisite denial, approval suspension, result normalization/redaction, and monotone permission behavior.
+- Schema validation, semantic correction feedback, retry exhaustion, successful empty tool results, and retryable/non-retryable structured failures.
+- Explicit child-agent context projection, lower-of budget, permission intersection, partial failure propagation, and deterministic aggregation.
 - Offer-fragment well-formedness and `ContractInvocable` mapping (invocation in, port call, structured result out).
 
 Property tests with jqwik:
@@ -650,3 +705,6 @@ Enterprise tests:
 10. Implement AI event schema and metadata-safe event builders.
 11. Implement downstream testing fixtures (echo provider, static embedder, in-memory vector store, recording tool executor).
 12. Complete coverage, architecture, and enterprise guardrail tests before flow and foundry consume the library.
+13. Add provider-neutral `ModelTurnOutcome`, `StructuredFailure`, `AgentTerminalEnvelope`, and compatibility migration for legacy finish/kind fields.
+14. Add `ToolCallInterceptor`, `SemanticValidator`, and `AgentDelegate` ports with no-I/O defaults and embedded-runtime integration.
+15. Add `ContextPolicy`, explicit child context projection, schema/semantic validation, and bounded correction/delegation behavior.

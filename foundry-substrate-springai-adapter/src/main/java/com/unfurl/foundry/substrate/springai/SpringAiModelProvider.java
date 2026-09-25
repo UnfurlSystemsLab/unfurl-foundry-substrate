@@ -1,9 +1,13 @@
 package com.unfurl.foundry.substrate.springai;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unfurl.foundry.substrate.model.Message;
 import com.unfurl.foundry.substrate.model.MessageRole;
 import com.unfurl.foundry.substrate.model.ModelRequest;
 import com.unfurl.foundry.substrate.model.ModelResponse;
+import com.unfurl.foundry.substrate.model.ModelToolCall;
+import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.model.ModelUsage;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
 import com.unfurl.substrate.policy.ExecutionContext;
@@ -33,6 +37,9 @@ import java.util.Objects;
  * to which provider is wired.
  */
 public final class SpringAiModelProvider implements ModelProvider {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final TypeReference<java.util.Map<String, Object>> ARGUMENTS_TYPE = new TypeReference<>() {
+    };
     private final ChatModel chatModel;
 
 /**
@@ -121,8 +128,39 @@ public final class SpringAiModelProvider implements ModelProvider {
         String finishReason = generation == null || generation.getMetadata() == null
                 ? ""
                 : Objects.requireNonNullElse(generation.getMetadata().getFinishReason(), "");
+        List<ModelToolCall> toolCalls = toolCallsFrom(assistant);
         ModelUsage usage = usageFrom(response);
-        return new ModelResponse(message, List.of(), finishReason, usage, java.util.Map.of());
+        return new ModelResponse(message, toolCalls, finishReason,
+                outcomeForFinishReason(finishReason, !toolCalls.isEmpty()), usage, java.util.Map.of(),
+                null, java.math.BigDecimal.ZERO);
+    }
+
+    /**
+     * Adapter mapping: normalizes Spring AI's provider-derived finish reason. Blank reasons remain
+     * compatible with simple ChatModel implementations; unknown non-blank values fail closed.
+     */
+    static ModelTurnOutcome outcomeForFinishReason(String finishReason, boolean hasToolCalls) {
+        return ModelTurnOutcome.fromLegacy(finishReason, hasToolCalls);
+    }
+
+    /**
+     * Adapter: projects Spring AI native tool-call records into Foundry's neutral tool-call shape.
+     * Invalid JSON arguments fail the provider boundary instead of being silently replaced.
+     */
+    private List<ModelToolCall> toolCallsFrom(AssistantMessage assistant) {
+        if (assistant == null || !assistant.hasToolCalls()) {
+            return List.of();
+        }
+        return assistant.getToolCalls().stream().map(call -> {
+            try {
+                java.util.Map<String, Object> arguments = call.arguments() == null || call.arguments().isBlank()
+                        ? java.util.Map.of()
+                        : MAPPER.readValue(call.arguments(), ARGUMENTS_TYPE);
+                return new ModelToolCall(call.id(), call.name(), arguments);
+            } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+                throw new IllegalArgumentException("Spring AI returned invalid tool-call arguments", ex);
+            }
+        }).toList();
     }
 
 /**

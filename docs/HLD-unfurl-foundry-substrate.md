@@ -48,7 +48,9 @@ If an implementation starts adding a model SDK, an HTTP client, a vector-DB driv
 - tool, prompt/message, model-request/response, RAG query/result, and embedding shapes
 - `FoundrySubstrateCodec` for stable JSON/YAML round trips of public model records
 - AI execution-state shape (agent run, phase state, tool-call records, cost accounting metadata)
-- AI ports: model provider, embedding provider, vector store, tool executor/registry, RAG retriever, agent runtime, agent harness runtime, provider registry, cost-guardrail, permission bridge
+- provider-neutral model-turn outcomes and structured tool-failure vocabulary
+- portable context-selection, terminal-output, semantic-validation, tool-interceptor, and agent-delegation contracts
+- AI ports: model provider, embedding provider, vector store, tool executor/registry, RAG retriever, agent runtime, agent harness runtime, provider registry, cost-guardrail, permission bridge, tool-call interceptor, semantic validator, and agent delegate
 - AI capability **offers** expressed as DCP claim fragments (`agent.run`, `tool.call`, `rag.search`, `provider.call`)
 - recursive DCP projection bridge claims for agents, phases, skills, tools, prompts, RAG, models, and Flow workflow references; these are visualization/inspection claims, not runtime execution decisions
 - AI `ContractInvocable` implementations that expose those offers over a frozen contract
@@ -107,6 +109,50 @@ The substrate owns the portable harness model and `AgentHarnessRuntime` port so 
 - any other completed agent output: stop in `COMPLETED`.
 
 Foundry owns durable/persisted harness execution, server APIs, recovery, queueing, streaming, and deployment wiring. Flow may still use Foundry through DCP `agent.run` or a future coarse-grained harness binding; Flow does not need to model the inner agentic loop as a chatty DAG.
+
+### Graph Core, Agent Interface
+
+Foundry does not choose between a graph representation and an Anthropic/Codex-style agent interface. The two forms serve different boundaries and are deliberately layered:
+
+- The **agent graph is the canonical intermediate representation**. `AgentDefinition` remains a versioned, serializable, inspectable DAG of bounded phases and conditional edges. It is the source of truth for validation, provenance, Studio visualization, and deterministic routing between declared reasoning phases.
+- The **agent harness is the execution interface**. It exposes the familiar model/tool/observation loop, repeated turns, clarification, gap, escalation, cancellation, and resume without exposing every model turn as a workflow node.
+- The **tool loop is dynamic but bounded**. Within one phase the model may request a permitted tool, observe its result, and continue until a provider-neutral terminal outcome or `maxToolIterations` is reached.
+- **Deterministic policy surrounds probabilistic choice**. Permission, prerequisite, approval, budget, schema, and semantic-validation decisions execute through ports before or after model/tool operations; prompt wording is not an enforcement mechanism.
+
+The graph is therefore not a visual encoding of a transcript, and the harness is not a second agent-definition format. A deployment may present a chat-like or coding-agent interface while still executing a pinned graph underneath.
+
+### `agentRef` Invocation Boundary
+
+Flow invokes an agent as one coarse capability node:
+
+```yaml
+- id: investigate
+  uses: agent.run
+  config:
+    agentRef: support-coordinator@1.2.0
+    input:
+      request: $.workflow.input.request
+      caseFacts: $.workflow.state.caseFacts
+```
+
+`agentRef` is an `id@version` reference resolved before execution. The resolved view is immutable and provenance-annotated and carries the agent definition digest, input and terminal-output schema refs, harness policy, referenced tools/skills/prompts/models/RAG sources, effective governance constraints, and DCP binding identity. Flow schedules the `agent.run` node and persists its coarse result; Foundry schedules the internal phases, model turns, tools, and child-agent calls.
+
+The contract returns a provider-neutral terminal envelope with a status such as `COMPLETED`, `WAITING_FOR_USER`, `ESCALATED`, `GAP`, `FAILED`, or `CANCELLED`, plus structured output, questions, handoff, confidence, provenance, error, and metering fields as applicable. Provider-native stop reasons and message formats never cross this boundary.
+
+### Context, Validation, And Delegation
+
+Agent execution must be explainable from explicit inputs rather than hidden transcript state:
+
+- `ContextPolicy` describes history selection, pinned facts, summary references, tool-result retention, provenance retention, and token allocation. The substrate owns the shape and selection port; Foundry owns summarization, persistence, and concrete stores.
+- Output schemas guarantee shape. A `SemanticValidator` port checks domain meaning and may return specific correction feedback. Correction retries are bounded by policy; exhaustion produces escalation or a structured failure.
+- `ToolCallInterceptor` is a Chain of Responsibility around every tool call. Before-call interceptors may deny, require approval, or attach normalized arguments; after-call interceptors may normalize, redact, or annotate results. They cannot widen permissions or bypass a frozen DCP contract.
+- `AgentDelegate` invokes a pinned child `agentRef` with an explicit context projection, expected output schema, and stricter-or-equal budget/permission envelope. Children do not inherit an implicit parent transcript. Independent child calls may run concurrently only in a host runtime that provides that facility.
+
+The substrate supplies only neutral contracts and a sequential reference implementation. Durable checkpoints, concurrent delegation, approval queues, retry scheduling, and human-review work queues remain Foundry responsibilities.
+
+### MCP Adapter Boundary
+
+MCP is an integration protocol, not a substrate primitive. An MCP server is bound by a Foundry-owned adapter that projects MCP tools and resources into neutral `ToolDefinition`/`ToolExecutor` and context-resource ports. Process management, HTTP/stdio transport, credentials, discovery caching, and server lifecycle stay in Foundry or an adapter repository. The substrate never imports an MCP SDK or opens a transport. When an imported capability crosses components, its use remains governed by a DCP claim and frozen contract.
 
 ---
 
@@ -212,7 +258,9 @@ Flow is the deterministic orchestrator and has no AI dependency of its own. It g
 
 1. Depending on `unfurl-foundry-substrate` and registering its AI executors into flow's `CapabilityRegistry` (via profile or via the DCP broker).
 2. Resolving `agentRef` / `toolRef` references at load time to agent/tool definitions from this layer's domain types — flow provides the resolution mechanism; the agent semantics are foundry's.
-3. Expressing a **multi-phase agent as a DAG of nodes joined by conditional edges** — the documented default. Flow owns the durable execution and conditional-edge routing of the phases; `unfurl-foundry` owns the reasoning inside each phase. The agent's continuation context is the output of one phase and the input of the next.
+3. Dispatching one coarse `uses: agent.run` node for a pinned `agentRef`. Foundry owns the agent's internal phase graph, bounded tool loop, continuation context, child-agent calls, and harness state. Flow owns the surrounding deterministic workflow and may durably execute a separately declared delegated workflow through `workflow.execute`.
+
+An internal agent phase is not automatically a Flow node. Promote work to a Flow workflow only when it is a business-visible deterministic unit that needs Flow-owned durability, scheduling, compensation, or cross-service coordination. This avoids turning every model/tool turn into a chatty distributed DAG while keeping genuinely durable work explicit.
 
 A workflow with no agent node still runs entirely within flow with zero model involvement. The AI capability is additive and contract-bounded.
 

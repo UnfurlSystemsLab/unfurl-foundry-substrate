@@ -22,6 +22,27 @@ mvn -pl unfurl-foundry-substrate -am test
 - Tool, prompt, event, and model boundary contracts.
 - Compatibility with `unfurl-foundry` runtime consumers.
 
+## Target Architecture
+
+The canonical representation remains a versioned `AgentDefinition` phase graph. An Anthropic/Codex-style experience is provided by `AgentHarnessRuntime`, which wraps the graph with bounded model/tool/observation turns, clarification, escalation, cancellation, and resume. These are complementary layers, not competing formats.
+
+Flow invokes the complete construct through `uses: agent.run` plus a pinned `agentRef`. Flow owns its surrounding deterministic workflow; Foundry owns the internal agent graph, harness turns, tools, and child-agent calls. Work is delegated back to Flow through DCP `workflow.execute` only when it is a separately declared deterministic workflow requiring Flow-owned durability or coordination.
+
+## Planned Contract Slices
+
+The implementation-ready file/type/test backlog and migration order are maintained in
+[`IMPLEMENTATION-agent-harness-contract-backlog.md`](IMPLEMENTATION-agent-harness-contract-backlog.md).
+
+1. **Neutral turn and terminal contracts:** add `ModelTurnOutcome`, `AgentTerminalEnvelope`, and compatibility decoding for current `finishReason`/`kind` fields.
+2. **Structured failures:** extend tool/delegation results with category, retryability, retry delay, sanitized message, partial output, and provenance; preserve successful-empty semantics.
+3. **Deterministic tool middleware:** add the `ToolCallInterceptor` Chain of Responsibility around every tool invocation, with monotone permission and approval behavior.
+4. **Schema and semantic validation:** declare phase/terminal schemas, add `SemanticValidator`, and support bounded correction feedback before escalation/failure.
+5. **Context policy:** add explicit history selection, pinned facts, summaries, tool-result retention, provenance retention, and token allocation without hidden memory.
+6. **Governed delegation:** add `AgentDelegate` and explicit child context projection; child budgets use lower-of composition and permissions use intersection.
+7. **Resolved `agentRef` view:** preserve `id@version`, definition digest, schema refs, harness policy, dependency provenance, governance, and DCP binding identity.
+
+Each slice must update public-record codec tests, architecture tests, event/error behavior, and Foundry consumer compatibility. No slice may introduce an SDK, transport, persistent store, MCP client, approval queue, or concurrent scheduler into this repository.
+
 ## GitHub Packages
 
 This repository participates in the `UnfurlSystemsLab` private Maven package chain.

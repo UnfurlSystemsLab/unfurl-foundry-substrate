@@ -5,6 +5,10 @@ import com.unfurl.foundry.substrate.agent.AgentHarnessDefinition;
 import com.unfurl.foundry.substrate.agent.AgentHarnessLoopPolicy;
 import com.unfurl.foundry.substrate.agent.AgentPhase;
 import com.unfurl.foundry.substrate.skill.SkillDefinition;
+import com.unfurl.foundry.substrate.model.Message;
+import com.unfurl.foundry.substrate.model.ModelResponse;
+import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
+import com.unfurl.foundry.substrate.model.ModelUsage;
 import com.unfurl.foundry.substrate.tool.ToolDefinition;
 import org.junit.jupiter.api.Test;
 
@@ -98,5 +102,20 @@ class FoundrySubstrateCodecTest {
         assertThat(reloaded.agent().id()).isEqualTo("authoring-agent");
         assertThat(reloaded.loopPolicy().maxTurns()).isEqualTo(4);
         assertThat(reloaded.metadata()).containsEntry("owner", "foundry");
+    }
+
+    /** Public-record compatibility: serializes the neutral outcome while retaining the legacy reason. */
+    @Test
+    void roundTripsModelResponseWithNeutralOutcome() {
+        ModelResponse response = new ModelResponse(
+                Message.assistant("done"), List.of(), "end_turn", ModelTurnOutcome.COMPLETED,
+                new ModelUsage(3, 5), Map.of("providerName", "test"), "test", null);
+
+        String json = codec.toJson(response);
+        ModelResponse reloaded = codec.fromJson(json, ModelResponse.class);
+
+        assertThat(json).contains("\"finishReason\"", "\"outcome\"");
+        assertThat(reloaded.outcome()).isEqualTo(ModelTurnOutcome.COMPLETED);
+        assertThat(reloaded.finishReason()).isEqualTo("end_turn");
     }
 }

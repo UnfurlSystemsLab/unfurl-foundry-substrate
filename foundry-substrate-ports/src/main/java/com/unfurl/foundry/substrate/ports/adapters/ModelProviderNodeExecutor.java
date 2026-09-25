@@ -46,6 +46,7 @@ public final class ModelProviderNodeExecutor implements NodeExecutor {
         output.put("message", response.message());
         output.put("toolCalls", response.toolCalls());
         output.put("finishReason", response.finishReason());
+        output.put("outcome", response.outcome().name());
         output.put("usage", response.usage());
         if (response.providerName() != null) {
             output.put("providerName", response.providerName());
