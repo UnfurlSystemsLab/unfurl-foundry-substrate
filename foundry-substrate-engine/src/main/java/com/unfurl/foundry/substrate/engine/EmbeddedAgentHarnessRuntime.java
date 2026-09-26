@@ -107,8 +107,9 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
         }
         Map<String, Object> nextInput = new LinkedHashMap<>(current.latestInput());
         nextInput.put("signal", signal == null ? Map.of() : Map.copyOf(signal));
+        ExecutionContext resumeContext = approvalContext(context, signal);
         return runLoop(harness, runId, current.createdAt(), current.originalInput(), Map.copyOf(nextInput),
-                current.observations(), current.turn(), context);
+                current.observations(), current.turn(), resumeContext);
     }
 
     /**
@@ -209,6 +210,14 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
                 return output;
             }
         }
+        if (run.status() == AgentRunStatus.FAILED) {
+            for (int i = agent.phases().size() - 1; i >= 0; i--) {
+                AgentPhaseState phase = run.phases().get(agent.phases().get(i).id());
+                if (phase != null && phase.status() == AgentPhaseStatus.FAILED && !phase.output().isEmpty()) {
+                    return phase.output();
+                }
+            }
+        }
         return fallback;
     }
 
@@ -247,6 +256,10 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      */
     private Decision decide(AgentRunState agentRun, Map<String, Object> output) {
         if (agentRun.status() == AgentRunStatus.FAILED) {
+            if ("TOOL_APPROVAL_REQUIRED".equals(agentRun.errorCode())) {
+                return new Decision(AgentHarnessStatus.WAITING_FOR_APPROVAL, "waiting_for_approval",
+                        Map.of(), agentRun.errorCode(), agentRun.errorMessage());
+            }
             return Decision.failure("failed", agentRun.errorCode() == null ? "AGENT_FAILED" : agentRun.errorCode(),
                     agentRun.errorMessage() == null ? "Inner agent failed" : agentRun.errorMessage());
         }
@@ -282,6 +295,27 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
                 ? messageFrom(output, "Agent completed")
                 : envelope.error().message();
         return new Decision(status, kind.isBlank() ? "complete" : kind, Map.of(), errorCode, message);
+    }
+
+    /**
+     * Approval Signal Adapter: projects an explicit resume approval id into neutral execution
+     * metadata consumed by a host approval interceptor; all unrelated context fields are preserved.
+     */
+    private ExecutionContext approvalContext(ExecutionContext context, Map<String, Object> signal) {
+        if (signal == null || signal.isEmpty()) {
+            return context;
+        }
+        Object approvalId = signal.get("approvalId");
+        Object tokens = signal.get("toolApprovalTokens");
+        if (approvalId == null && tokens == null) {
+            return context;
+        }
+        ExecutionContext base = context == null ? ExecutionContext.empty() : context;
+        Map<String, Object> metadata = new LinkedHashMap<>(base.metadata());
+        metadata.put("toolApprovalTokens", tokens != null ? tokens : List.of(String.valueOf(approvalId)));
+        return new ExecutionContext(
+                base.tenantId(), base.userId(), base.roles(), base.permissions(), base.correlationId(),
+                base.requestId(), base.traceContext(), Map.copyOf(metadata));
     }
 
     /**

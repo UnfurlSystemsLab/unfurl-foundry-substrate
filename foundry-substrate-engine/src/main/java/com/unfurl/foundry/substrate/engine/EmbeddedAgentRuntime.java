@@ -25,6 +25,9 @@ import com.unfurl.foundry.substrate.ports.ModelProvider;
 import com.unfurl.foundry.substrate.ports.ProviderRegistry;
 import com.unfurl.foundry.substrate.ports.RagRetriever;
 import com.unfurl.foundry.substrate.ports.ToolCallRequest;
+import com.unfurl.foundry.substrate.ports.ToolCallDecision;
+import com.unfurl.foundry.substrate.ports.ToolCallDecisionType;
+import com.unfurl.foundry.substrate.ports.ToolCallInterceptorChain;
 import com.unfurl.foundry.substrate.ports.ToolCallResult;
 import com.unfurl.foundry.substrate.ports.ToolExecutor;
 import com.unfurl.foundry.substrate.ports.ToolRegistry;
@@ -73,6 +76,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     private final RagRetriever ragRetriever;
     private final CostGuardrail costGuardrail;
     private final PermissionBridge permissionBridge;
+    private final ToolCallInterceptorChain toolCallInterceptors;
     private final AgentEventSink eventSink;
     private final PromptAssembler promptAssembler;
     private final DataReferenceResolver resolver;
@@ -86,7 +90,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     public EmbeddedAgentRuntime(ProviderRegistry providerRegistry, ToolRegistry toolRegistry) {
         this(providerRegistry, toolRegistry, null, new BudgetPolicyCostGuardrail(), new AllowAllPermissionBridge(),
                 defaultEventSink(), new PromptAssembler(), new DataReferenceResolver(),
-                new AgentDefinitionValidator(), defaultStore(), Map.of());
+                new AgentDefinitionValidator(), defaultStore(), Map.of(), ToolCallInterceptorChain.empty());
     }
 
 /**
@@ -105,11 +109,35 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             AgentRunStore store,
             Map<String, PromptTemplate> templates
     ) {
+        this(providerRegistry, toolRegistry, ragRetriever, costGuardrail, permissionBridge, eventSink,
+                promptAssembler, resolver, validator, store, templates, ToolCallInterceptorChain.empty());
+    }
+
+    /**
+     * Constructs the embedded runtime with a host-supplied deterministic tool policy chain while
+     * preserving the legacy constructor as a no-op-chain compatibility path.
+     */
+    public EmbeddedAgentRuntime(
+            ProviderRegistry providerRegistry,
+            ToolRegistry toolRegistry,
+            RagRetriever ragRetriever,
+            CostGuardrail costGuardrail,
+            PermissionBridge permissionBridge,
+            AgentEventSink eventSink,
+            PromptAssembler promptAssembler,
+            DataReferenceResolver resolver,
+            AgentDefinitionValidator validator,
+            AgentRunStore store,
+            Map<String, PromptTemplate> templates,
+            ToolCallInterceptorChain toolCallInterceptors
+    ) {
         this.providerRegistry = providerRegistry;
         this.toolRegistry = toolRegistry;
         this.ragRetriever = ragRetriever;
         this.costGuardrail = costGuardrail;
         this.permissionBridge = permissionBridge;
+        this.toolCallInterceptors = toolCallInterceptors == null
+                ? ToolCallInterceptorChain.empty() : toolCallInterceptors;
         this.eventSink = eventSink == null ? defaultEventSink() : eventSink;
         this.promptAssembler = promptAssembler;
         this.resolver = resolver;
@@ -304,7 +332,22 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                     return failedPhase(phase.id(), resolvedInput, messages, "TOOL_NOT_ALLOWED",
                             "Tool not allowed for phase: " + call.toolName(), started);
                 }
-                PermissionDecision permission = permissionBridge.check(call.toolName(), call.arguments(), context);
+                ToolCallRequest originalRequest = new ToolCallRequest(
+                        call.id(), call.toolName(), call.arguments(), Map.of());
+                ToolCallDecision interceptorDecision = toolCallInterceptors.before(originalRequest, context);
+                Map<String, Object> effectiveArguments = interceptorDecision.arguments();
+                if (interceptorDecision.type() != ToolCallDecisionType.ALLOW) {
+                    ToolCallResult denied = ToolCallResult.failure(interceptorDecision.failure())
+                            .withMetadata(interceptorDecision.metadata());
+                    toolCalls.add(new ToolCall(call.id(), call.toolName(), effectiveArguments,
+                            denied.output(), denied.errorCode(), denied.errorMessage(), Instant.now(), Instant.now()));
+                    emit(context, state, phase.id(), AgentEventType.TOOL_FAILED, Map.of(
+                            "tool", call.toolName(),
+                            "errorCode", denied.errorCode(),
+                            "decision", interceptorDecision.type().name()));
+                    return failedToolPhase(phase.id(), resolvedInput, messages, toolCalls, denied, started);
+                }
+                PermissionDecision permission = permissionBridge.check(call.toolName(), effectiveArguments, context);
                 if (!permission.allowed()) {
                     return failedPhase(phase.id(), resolvedInput, messages, "PERMISSION_DENIED",
                             "Tool not permitted: " + call.toolName(), started);
@@ -316,9 +359,11 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 }
                 emit(context, state, phase.id(), AgentEventType.TOOL_CALLED, Map.of("tool", call.toolName()));
                 Instant toolStart = Instant.now();
-                ToolCallResult toolResult = executor.execute(
-                        new ToolCallRequest(call.id(), call.toolName(), call.arguments(), Map.of()), context);
-                toolCalls.add(new ToolCall(call.id(), call.toolName(), call.arguments(),
+                ToolCallRequest effectiveRequest = new ToolCallRequest(
+                        call.id(), call.toolName(), effectiveArguments, interceptorDecision.metadata());
+                ToolCallResult toolResult = executor.execute(effectiveRequest, context);
+                toolResult = toolCallInterceptors.after(effectiveRequest, toolResult, context);
+                toolCalls.add(new ToolCall(call.id(), call.toolName(), effectiveArguments,
                         toolResult.output(), toolResult.errorCode(), toolResult.errorMessage(), toolStart, Instant.now()));
                 if (!toolResult.success()) {
                     emit(context, state, phase.id(), AgentEventType.TOOL_FAILED, Map.of(

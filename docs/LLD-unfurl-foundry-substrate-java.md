@@ -415,6 +415,15 @@ Result types are immutable records or sealed interfaces. Do not throw for expect
 
 `ToolCallInterceptor` uses Chain of Responsibility semantics. Interceptors run in stable configured order before a tool is resolved/executed and in reverse order after a result is returned. A before decision may allow, deny, require approval, or replace arguments with a normalized map; it may never add permissions. An after decision may normalize, redact, or annotate a result but may not convert a policy denial into success. Foundry supplies concrete policy, approval, audit, and normalization interceptors; the substrate supplies the contract and an empty no-op chain.
 
+`ToolCallDecision` carries `ALLOW`, `DENY`, or `REQUIRE_APPROVAL`, the current normalized
+argument map, optional structured failure, and policy metadata. `ToolCallInterceptorChain` is the
+Composite/Chain implementation used by the embedded runtime. It threads normalized arguments through
+before interceptors, stops at the first non-allow decision, and applies after interceptors in reverse.
+After interceptors may change existing output values or remove fields, and may append result metadata,
+but cannot introduce a previously absent output field or turn a failed result into success. The embedded
+runtime maps denial and approval-required decisions to structured, pre-execution phase failures; a
+durable Foundry host persists the approval request and re-enters with a one-time approval token.
+
 `SemanticValidator` is separate from JSON-schema validation. Schema validation establishes shape before or after projection; semantic validation checks claims such as totals, ranges, source grounding, and domain invariants. A phase may attach a bounded correction policy that feeds specific validation failures into another model turn. Exhaustion returns `VALIDATION_FAILED` or an escalation envelope, never an unbounded retry loop.
 
 `AgentDelegate` is the Strategy port for coordinator/subagent invocation. The embedded strategy is sequential. Foundry may provide a concurrent and durable implementation, but must enforce explicit context projection, pinned references, lower-of budgets, permission intersection, and structured child failure propagation.
