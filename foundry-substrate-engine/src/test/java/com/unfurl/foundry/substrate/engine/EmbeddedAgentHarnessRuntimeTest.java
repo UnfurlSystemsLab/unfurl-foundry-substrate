@@ -12,6 +12,7 @@ import com.unfurl.foundry.substrate.runstate.AgentPhaseStatus;
 import com.unfurl.foundry.substrate.runstate.AgentRunState;
 import com.unfurl.foundry.substrate.runstate.AgentRunStatus;
 import com.unfurl.foundry.substrate.runstate.CostAccounting;
+import com.unfurl.foundry.substrate.terminal.AgentTerminalStatus;
 import com.unfurl.substrate.policy.ExecutionContext;
 import org.junit.jupiter.api.Test;
 
@@ -55,6 +56,8 @@ class EmbeddedAgentHarnessRuntimeTest {
 
         assertThat(run.status()).isEqualTo(AgentHarnessStatus.WAITING_FOR_USER);
         assertThat(run.output().get("questions")).isEqualTo(List.of("Which catalog?"));
+        assertThat(run.terminalEnvelope().status()).isEqualTo(AgentTerminalStatus.WAITING_FOR_USER);
+        assertThat(run.observations().getFirst().terminalEnvelope()).isEqualTo(run.terminalEnvelope());
     }
 
     @Test
@@ -86,6 +89,38 @@ class EmbeddedAgentHarnessRuntimeTest {
 
         assertThat(run.status()).isEqualTo(AgentHarnessStatus.GAP);
         assertThat(run.output().get("unmet")).isEqualTo(List.of("rag.search"));
+    }
+
+    /** Verifies approval is resumable and its canonical terminal envelope survives the checkpoint. */
+    @Test
+    void resumesApprovalWaitWithSignalInput() {
+        AgentDefinition agent = agent(Map.of());
+        ScriptedAgentRuntime agentRuntime = new ScriptedAgentRuntime(List.of(
+                completedRun("inner-1", agent, Map.of("kind", "approval", "questions", List.of("Approve?"))),
+                completedRun("inner-2", agent, Map.of("kind", "complete", "approved", true))));
+        EmbeddedAgentHarnessRuntime harnessRuntime = new EmbeddedAgentHarnessRuntime(agentRuntime);
+
+        AgentHarnessRunState waiting = harnessRuntime.start(harness(agent, 3), Map.of(), ExecutionContext.empty());
+        AgentHarnessRunState resumed = harnessRuntime.resume(
+                waiting.runId(), Map.of("approved", true), ExecutionContext.empty());
+
+        assertThat(waiting.status()).isEqualTo(AgentHarnessStatus.WAITING_FOR_APPROVAL);
+        assertThat(waiting.terminalEnvelope().status()).isEqualTo(AgentTerminalStatus.WAITING_FOR_APPROVAL);
+        assertThat(resumed.status()).isEqualTo(AgentHarnessStatus.COMPLETED);
+    }
+
+    /** Verifies malformed clarification cannot escape the harness as a successful terminal result. */
+    @Test
+    void failsMalformedClarificationOutput() {
+        AgentDefinition agent = agent(Map.of());
+        EmbeddedAgentHarnessRuntime harnessRuntime = new EmbeddedAgentHarnessRuntime(new ScriptedAgentRuntime(List.of(
+                completedRun("inner-1", agent, Map.of("kind", "clarify")))));
+
+        AgentHarnessRunState run = harnessRuntime.start(harness(agent, 1), Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentHarnessStatus.FAILED);
+        assertThat(run.errorCode()).isEqualTo("AGENT_OUTPUT_INVALID");
+        assertThat(run.terminalEnvelope().error().code()).isEqualTo("AGENT_OUTPUT_INVALID");
     }
 
     @Test

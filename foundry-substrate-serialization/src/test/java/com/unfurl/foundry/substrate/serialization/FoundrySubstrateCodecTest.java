@@ -12,6 +12,8 @@ import com.unfurl.foundry.substrate.model.ModelResponse;
 import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.model.ModelUsage;
 import com.unfurl.foundry.substrate.tool.ToolDefinition;
+import com.unfurl.foundry.substrate.terminal.AgentTerminalEnvelope;
+import com.unfurl.foundry.substrate.terminal.AgentTerminalStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -133,5 +135,24 @@ class FoundrySubstrateCodecTest {
         StructuredFailure reloaded = codec.fromYaml(codec.toYaml(failure), StructuredFailure.class);
 
         assertThat(reloaded).isEqualTo(failure);
+    }
+
+    /** Public-record compatibility: round-trips all neutral terminal-envelope sections. */
+    @Test
+    void roundTripsAgentTerminalEnvelope() {
+        AgentTerminalEnvelope envelope = new AgentTerminalEnvelope(
+                AgentTerminalStatus.WAITING_FOR_APPROVAL,
+                Map.of("proposalId", "p-1"),
+                List.of("Approve deployment?"),
+                Map.of("queue", "operators"),
+                Map.of("score", 0.91),
+                Map.of("agentRef", "deploy@1.0.0"),
+                null,
+                Map.of("totalTokens", 42),
+                Map.of("legacyKind", "approval"));
+
+        AgentTerminalEnvelope reloaded = codec.fromJson(codec.toJson(envelope), AgentTerminalEnvelope.class);
+
+        assertThat(reloaded).isEqualTo(envelope);
     }
 }

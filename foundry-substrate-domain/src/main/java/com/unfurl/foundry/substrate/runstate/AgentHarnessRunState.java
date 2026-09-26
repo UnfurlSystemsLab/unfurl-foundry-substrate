@@ -1,5 +1,7 @@
 package com.unfurl.foundry.substrate.runstate;
 
+import com.unfurl.foundry.substrate.terminal.AgentTerminalEnvelope;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -23,8 +25,30 @@ public record AgentHarnessRunState(
         String errorCode,
         String errorMessage,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        AgentTerminalEnvelope terminalEnvelope
 ) {
+    /**
+     * Compatibility constructor: preserves the former harness snapshot signature during migration.
+     */
+    public AgentHarnessRunState(
+            String tenantId,
+            String runId,
+            String harnessId,
+            String harnessVersion,
+            AgentHarnessStatus status,
+            int turn,
+            Map<String, Object> originalInput,
+            Map<String, Object> latestInput,
+            List<AgentHarnessObservation> observations,
+            Map<String, Object> output,
+            String errorCode,
+            String errorMessage,
+            Instant createdAt,
+            Instant updatedAt) {
+        this(tenantId, runId, harnessId, harnessVersion, status, turn, originalInput, latestInput,
+                observations, output, errorCode, errorMessage, createdAt, updatedAt, null);
+    }
     /**
      * Constructs AgentHarnessRunState with defensive collection copies so
      * snapshots are safe to retain, serialize, or checkpoint.

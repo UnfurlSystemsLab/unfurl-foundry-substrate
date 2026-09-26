@@ -1,6 +1,6 @@
 # Implementation Backlog: Graph-Backed Agent Harness Contracts
 
-**Status:** Approved architecture translated into implementation slices. Slices 1-2 are implemented; Slices 3-7 remain planned.
+**Status:** Approved architecture translated into implementation slices. Slices 1-3 are implemented; Slices 4-7 remain planned.
 **Scope:** `unfurl-foundry-substrate`, `unfurl-foundry`, and the narrow `unfurl-flow` `agentRef` integration.
 **Governing design:** `HLD-unfurl-foundry-substrate.md`, `LLD-unfurl-foundry-substrate-java.md`, and the repository build specs.
 
@@ -67,6 +67,8 @@
 - Tool, DCP invocation, HTTP, codec, and server tests cover every category and partial-result behavior.
 
 ## Slice 3: Terminal Envelope And Harness Migration
+
+**Status:** Implemented and verified in `unfurl-foundry-substrate`, `unfurl-foundry`, and `unfurl-flow`.
 
 **Goal:** replace arbitrary last-phase output with a stable provider-neutral `agent.run` result.
 

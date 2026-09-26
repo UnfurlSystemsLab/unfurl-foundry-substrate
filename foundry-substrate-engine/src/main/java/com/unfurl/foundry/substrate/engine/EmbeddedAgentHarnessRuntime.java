@@ -15,6 +15,9 @@ import com.unfurl.foundry.substrate.runstate.AgentPhaseState;
 import com.unfurl.foundry.substrate.runstate.AgentPhaseStatus;
 import com.unfurl.foundry.substrate.runstate.AgentRunState;
 import com.unfurl.foundry.substrate.runstate.AgentRunStatus;
+import com.unfurl.foundry.substrate.terminal.AgentTerminalEnvelope;
+import com.unfurl.foundry.substrate.terminal.AgentTerminalStatus;
+import com.unfurl.foundry.substrate.terminal.TerminalEnvelopeNormalizer;
 import com.unfurl.substrate.policy.ExecutionContext;
 
 import java.time.Duration;
@@ -40,6 +43,7 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
 
     private final AgentRuntime agentRuntime;
     private final AgentHarnessDefinitionValidator validator;
+    private final TerminalEnvelopeNormalizer terminalNormalizer;
     private final ConcurrentMap<String, AgentHarnessRunState> runs = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, AgentHarnessDefinition> definitions = new ConcurrentHashMap<>();
 
@@ -48,7 +52,7 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      * and the standard harness validator.
      */
     public EmbeddedAgentHarnessRuntime(AgentRuntime agentRuntime) {
-        this(agentRuntime, new AgentHarnessDefinitionValidator());
+        this(agentRuntime, new AgentHarnessDefinitionValidator(), new TerminalEnvelopeNormalizer());
     }
 
     /**
@@ -56,8 +60,19 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      * can reuse their already configured agent validation strategy.
      */
     public EmbeddedAgentHarnessRuntime(AgentRuntime agentRuntime, AgentHarnessDefinitionValidator validator) {
+        this(agentRuntime, validator, new TerminalEnvelopeNormalizer());
+    }
+
+    /**
+     * Constructs the harness with injected validation and terminal normalization strategies.
+     */
+    public EmbeddedAgentHarnessRuntime(
+            AgentRuntime agentRuntime,
+            AgentHarnessDefinitionValidator validator,
+            TerminalEnvelopeNormalizer terminalNormalizer) {
         this.agentRuntime = Objects.requireNonNull(agentRuntime, "agentRuntime");
         this.validator = validator == null ? new AgentHarnessDefinitionValidator() : validator;
+        this.terminalNormalizer = terminalNormalizer == null ? new TerminalEnvelopeNormalizer() : terminalNormalizer;
     }
 
     /**
@@ -81,7 +96,8 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
     @Override
     public AgentHarnessRunState resume(String runId, Map<String, Object> signal, ExecutionContext context) {
         AgentHarnessRunState current = requireRun(runId);
-        if (current.status() != AgentHarnessStatus.WAITING_FOR_USER) {
+        if (current.status() != AgentHarnessStatus.WAITING_FOR_USER
+                && current.status() != AgentHarnessStatus.WAITING_FOR_APPROVAL) {
             return current;
         }
         AgentHarnessDefinition harness = definitions.get(runId);
@@ -142,10 +158,13 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
             Map<String, Object> output = terminalOutput(harness.agent(), agentRun);
             Decision decision = decide(agentRun, output);
             observations.add(new AgentHarnessObservation(turn, agentRun.runId(), agentRun.status(), output,
-                    decision.kind(), decision.message(), turnStartedAt, Instant.now()));
+                    decision.kind(), decision.message(), turnStartedAt, Instant.now(),
+                    envelopeFor(decision.status(), output, decision.errorCode(), decision.message())));
 
             if (decision.status() == AgentHarnessStatus.COMPLETED
                     || decision.status() == AgentHarnessStatus.WAITING_FOR_USER
+                    || decision.status() == AgentHarnessStatus.WAITING_FOR_APPROVAL
+                    || decision.status() == AgentHarnessStatus.ESCALATED
                     || decision.status() == AgentHarnessStatus.GAP
                     || decision.status() == AgentHarnessStatus.FAILED
                     || decision.status() == AgentHarnessStatus.CANCELLED) {
@@ -239,14 +258,6 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
         }
 
         String kind = string(output.get("kind")).trim();
-        if ("clarify".equalsIgnoreCase(kind) || nonEmptyCollection(output.get("questions"))) {
-            return new Decision(AgentHarnessStatus.WAITING_FOR_USER, "clarify", Map.of(), null,
-                    messageFrom(output, "Agent requested clarification"));
-        }
-        if ("gap".equalsIgnoreCase(kind) || nonEmptyCollection(output.get("unmet"))) {
-            return new Decision(AgentHarnessStatus.GAP, "gap", Map.of(), null,
-                    messageFrom(output, "Agent reported a gap"));
-        }
         if ("continue".equalsIgnoreCase(kind)) {
             Object nextInput = output.get("nextInput");
             if (!(nextInput instanceof Map<?, ?> map)) {
@@ -256,8 +267,50 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
             return new Decision(AgentHarnessStatus.RUNNING, "continue", stringifyKeys(map), null,
                     messageFrom(output, "Agent requested another harness turn"));
         }
-        return new Decision(AgentHarnessStatus.COMPLETED, kind.isBlank() ? "complete" : kind, Map.of(), null,
-                messageFrom(output, "Agent completed"));
+        AgentTerminalEnvelope envelope = terminalNormalizer.normalize(output);
+        AgentHarnessStatus status = switch (envelope.status()) {
+            case COMPLETED -> AgentHarnessStatus.COMPLETED;
+            case WAITING_FOR_USER -> AgentHarnessStatus.WAITING_FOR_USER;
+            case WAITING_FOR_APPROVAL -> AgentHarnessStatus.WAITING_FOR_APPROVAL;
+            case ESCALATED -> AgentHarnessStatus.ESCALATED;
+            case GAP -> AgentHarnessStatus.GAP;
+            case FAILED -> AgentHarnessStatus.FAILED;
+            case CANCELLED -> AgentHarnessStatus.CANCELLED;
+        };
+        String errorCode = envelope.error() == null ? null : envelope.error().code();
+        String message = envelope.error() == null
+                ? messageFrom(output, "Agent completed")
+                : envelope.error().message();
+        return new Decision(status, kind.isBlank() ? "complete" : kind, Map.of(), errorCode, message);
+    }
+
+    /**
+     * Projection Strategy: creates the canonical terminal envelope stored with observations and snapshots.
+     */
+    private AgentTerminalEnvelope envelopeFor(
+            AgentHarnessStatus status,
+            Map<String, Object> output,
+            String errorCode,
+            String errorMessage) {
+        if (status == AgentHarnessStatus.RUNNING) {
+            return null;
+        }
+        if (status == AgentHarnessStatus.FAILED) {
+            return terminalNormalizer.failure(errorCode, errorMessage, output);
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>(output == null ? Map.of() : output);
+        if (status != AgentHarnessStatus.COMPLETED || !normalized.containsKey("kind")) {
+            String kind = switch (status) {
+                case WAITING_FOR_USER -> "clarify";
+                case WAITING_FOR_APPROVAL -> "waiting_for_approval";
+                case ESCALATED -> "escalated";
+                case GAP -> "gap";
+                case CANCELLED -> "cancelled";
+                default -> "complete";
+            };
+            normalized.put("kind", kind);
+        }
+        return terminalNormalizer.normalize(normalized);
     }
 
     /**
@@ -292,7 +345,8 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
                 errorCode,
                 errorMessage,
                 createdAt,
-                Instant.now());
+                Instant.now(),
+                envelopeFor(status, output, errorCode, errorMessage));
     }
 
     /**
@@ -329,7 +383,8 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
     ) {
         return new AgentHarnessRunState(current.tenantId(), current.runId(), current.harnessId(),
                 current.harnessVersion(), status, current.turn(), current.originalInput(), current.latestInput(),
-                current.observations(), output, errorCode, errorMessage, current.createdAt(), Instant.now());
+                current.observations(), output, errorCode, errorMessage, current.createdAt(), Instant.now(),
+                envelopeFor(status, output, errorCode, errorMessage));
     }
 
     /**
@@ -338,6 +393,7 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      */
     private boolean isTerminal(AgentHarnessStatus status) {
         return status == AgentHarnessStatus.COMPLETED
+                || status == AgentHarnessStatus.ESCALATED
                 || status == AgentHarnessStatus.GAP
                 || status == AgentHarnessStatus.FAILED
                 || status == AgentHarnessStatus.CANCELLED;
@@ -419,17 +475,6 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
             return list.stream().map(this::normalizeValue).toList();
         }
         return value == null ? "" : value;
-    }
-
-    /**
-     * Predicate: treats non-empty collections and arrays as a structured signal
-     * for clarification or gap handling.
-     */
-    private boolean nonEmptyCollection(Object value) {
-        if (value instanceof Collection<?> collection) {
-            return !collection.isEmpty();
-        }
-        return value instanceof Object[] array && array.length > 0;
     }
 
     /**

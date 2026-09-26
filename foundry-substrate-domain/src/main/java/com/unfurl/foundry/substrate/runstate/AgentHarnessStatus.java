@@ -8,6 +8,8 @@ public enum AgentHarnessStatus {
     RUNNING,
     COMPLETED,
     WAITING_FOR_USER,
+    WAITING_FOR_APPROVAL,
+    ESCALATED,
     GAP,
     FAILED,
     CANCELLED

@@ -256,7 +256,7 @@ Harness terminal output convention:
 - `kind: gap` or a non-empty `unmet` list: stop in `GAP`.
 - any other completed agent output: stop in `COMPLETED`.
 
-The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`, `questions`, `handoff`, `confidence`, `provenance`, `error`, and `metering`. During migration the embedded harness continues accepting the existing `kind` convention and normalizes it to the envelope. Provider-native stop reasons never appear in this contract.
+The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`, `questions`, `handoff`, `confidence`, `provenance`, `error`, `metering`, and reserved `metadata`. During migration the embedded harness continues accepting the existing `kind` convention and normalizes it to the envelope. Approval kinds take precedence over a generic non-empty question list; clarification requires at least one question; malformed terminal shapes fail closed as `AGENT_OUTPUT_INVALID`. `AgentHarnessRunState` and each terminal `AgentHarnessObservation` retain the normalized envelope so product runtimes can checkpoint it without reconstructing agent semantics. Provider-native stop reasons never appear in this contract.
 
 `AgentHarnessRunState` and `AgentHarnessObservation`
 
