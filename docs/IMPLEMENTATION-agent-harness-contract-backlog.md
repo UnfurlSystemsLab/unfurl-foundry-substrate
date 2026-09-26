@@ -1,6 +1,6 @@
 # Implementation Backlog: Graph-Backed Agent Harness Contracts
 
-**Status:** Approved architecture translated into implementation slices. Slices 1-3 are implemented; Slices 4-7 remain planned.
+**Status:** Approved architecture translated into implementation slices. Slices 1-4 are implemented; Slices 5-7 remain planned.
 **Scope:** `unfurl-foundry-substrate`, `unfurl-foundry`, and the narrow `unfurl-flow` `agentRef` integration.
 **Governing design:** `HLD-unfurl-foundry-substrate.md`, `LLD-unfurl-foundry-substrate-java.md`, and the repository build specs.
 
@@ -98,6 +98,8 @@
 - Start, clarification, approval, resume, gap, escalation, failure, cancellation, and checkpoint recovery are covered end to end.
 
 ## Slice 4: Resolved `agentRef` Contract
+
+**Status:** Implemented and verified in `unfurl-foundry-substrate` and `unfurl-flow`.
 
 **Goal:** make invocation reproducible and auditable without teaching Flow agent semantics.
 

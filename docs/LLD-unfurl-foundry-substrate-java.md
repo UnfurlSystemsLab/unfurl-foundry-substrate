@@ -264,6 +264,13 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 - `AgentHarnessObservation`: turn number, agent run id/status, agent output, decision kind, message, timestamps.
 - These are execution snapshots for a bounded embedded loop. Durable checkpoints, external waits, streaming, queue ownership, and persisted recovery remain in `unfurl-foundry`.
 
+`ResolvedAgentReference`
+
+- Fields: pinned reference, agent id/version, SHA-256 canonical definition digest, input-schema ref, terminal-output-schema ref, harness loop policy, dependency provenance, agent budget policy, permission constraints, governance constraints, DCP binding identity, and extension metadata.
+- `ResolvedAgentReferenceFactory` validates that the resolved definition id/version exactly match the requested pinned reference. Schema refs default to stable inline refs when the agent metadata does not declare external refs.
+- Dependency provenance is derived deterministically from the agent graph and metadata and groups tool, skill, model, prompt, and RAG references without exposing provider credentials.
+- `CanonicalAgentDefinitionDigest` hashes the UTF-8 stable JSON representation with alphabetically ordered properties/map keys. It recursively removes only raw mutable secret/runtime metadata keys (`apiKey`, `accessToken`, `password`, `clientSecret`, `secret`, `secrets`, `credentials`, `runtimeState`, `deploymentState`, `lastUpdated`, and `updatedAt`); credential references and all executable semantics remain digest-bearing.
+
 `AgentPhase`
 
 - Fields: `id`, `promptTemplateRef`, `modelRef`, `allowedToolRefs`, `ragQueryRef`, `input`, `outputMapping`, `dependencies`, `maxToolIterations`.

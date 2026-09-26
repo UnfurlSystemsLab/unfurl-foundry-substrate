@@ -24,7 +24,7 @@ class ArchitectureTest {
             Map.entry("prompt", Set.of("domain")),
             Map.entry("tools", Set.of("ports", "substrate-ports")),
             Map.entry("rag", Set.of("domain", "ports", "substrate-ports")),
-            Map.entry("resolver", Set.of("domain", "substrate-resolver")),
+            Map.entry("resolver", Set.of("domain", "serialization", "substrate-resolver")),
             Map.entry("serialization", Set.of("domain")),
             Map.entry("offers", Set.of("domain", "ports", "dcp", "substrate-domain", "substrate-ports",
                     "substrate-composition-api")),

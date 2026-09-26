@@ -16,6 +16,10 @@
             <artifactId>foundry-substrate-domain</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.unfurl.foundry.substrate</groupId>
+            <artifactId>foundry-substrate-serialization</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.unfurl.substrate</groupId>
             <artifactId>substrate-resolver</artifactId>
         </dependency>
