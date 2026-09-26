@@ -109,6 +109,26 @@ class EmbeddedAgentHarnessRuntimeTest {
         assertThat(resumed.status()).isEqualTo(AgentHarnessStatus.COMPLETED);
     }
 
+    /** A policy-level approval failure becomes a resumable harness wait with token projection. */
+    @Test
+    void convertsToolApprovalDecisionIntoHarnessWait() {
+        AgentDefinition agent = agent(Map.of());
+        ScriptedAgentRuntime agentRuntime = new ScriptedAgentRuntime(List.of(
+                approvalRun("inner-1", agent, "approval-1"),
+                completedRun("inner-2", agent, Map.of("kind", "complete", "approved", true))));
+        EmbeddedAgentHarnessRuntime harnessRuntime = new EmbeddedAgentHarnessRuntime(agentRuntime);
+
+        AgentHarnessRunState waiting = harnessRuntime.start(harness(agent, 3), Map.of(), ExecutionContext.empty());
+        AgentHarnessRunState resumed = harnessRuntime.resume(
+                waiting.runId(), Map.of("approvalId", "approval-1"), ExecutionContext.empty());
+
+        assertThat(waiting.status()).isEqualTo(AgentHarnessStatus.WAITING_FOR_APPROVAL);
+        assertThat(waiting.output()).containsEntry("approvalId", "approval-1");
+        assertThat(agentRuntime.contexts().get(1).metadata())
+                .containsEntry("toolApprovalTokens", List.of("approval-1"));
+        assertThat(resumed.status()).isEqualTo(AgentHarnessStatus.COMPLETED);
+    }
+
     /** Verifies malformed clarification cannot escape the harness as a successful terminal result. */
     @Test
     void failsMalformedClarificationOutput() {
@@ -216,6 +236,19 @@ class EmbeddedAgentHarnessRuntimeTest {
                 output, null, null, now, now);
     }
 
+    /** Fixture builder: creates a failed inner run carrying an approval id as partial output. */
+    private AgentRunState approvalRun(String runId, AgentDefinition agent, String approvalId) {
+        Instant now = Instant.now();
+        String phaseId = agent.phases().getFirst().id();
+        AgentPhaseState failed = new AgentPhaseState(
+                phaseId, AgentPhaseStatus.FAILED, Map.of(), List.of(), List.of(),
+                Map.of("approvalId", approvalId), "TOOL_APPROVAL_REQUIRED",
+                "Tool call requires approval", now, now);
+        return new AgentRunState(null, runId, agent.id(), agent.version(), AgentRunStatus.FAILED,
+                Map.of(), Map.of(phaseId, failed), CostAccounting.empty(Map.of()),
+                "TOOL_APPROVAL_REQUIRED", "Tool call requires approval", now, now);
+    }
+
     /**
      * Test Adapter: returns scripted agent run states and records the inputs
      * supplied by the harness on each turn.
@@ -223,6 +256,7 @@ class EmbeddedAgentHarnessRuntimeTest {
     private static final class ScriptedAgentRuntime implements AgentRuntime {
         private final Deque<AgentRunState> runs;
         private final List<Map<String, Object>> inputs = new ArrayList<>();
+        private final List<ExecutionContext> contexts = new ArrayList<>();
 
         /**
          * Constructs ScriptedAgentRuntime from the ordered runs it should return
@@ -238,6 +272,7 @@ class EmbeddedAgentHarnessRuntimeTest {
         @Override
         public AgentRunState start(AgentDefinition agent, Map<String, Object> input, ExecutionContext context) {
             inputs.add(input == null ? Map.of() : Map.copyOf(input));
+            contexts.add(context);
             return runs.removeFirst();
         }
 
@@ -262,6 +297,11 @@ class EmbeddedAgentHarnessRuntimeTest {
          */
         private List<Map<String, Object>> inputs() {
             return List.copyOf(inputs);
+        }
+
+        /** Exposes execution contexts so approval-token projection can be verified. */
+        private List<ExecutionContext> contexts() {
+            return List.copyOf(contexts);
         }
     }
 }

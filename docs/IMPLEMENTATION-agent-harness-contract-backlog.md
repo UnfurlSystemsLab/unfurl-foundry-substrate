@@ -1,6 +1,6 @@
 # Implementation Backlog: Graph-Backed Agent Harness Contracts
 
-**Status:** Approved architecture translated into implementation slices. Slices 1-4 are implemented; Slices 5-7 remain planned.
+**Status:** Approved architecture translated into implementation slices. Slices 1-5 are implemented; Slices 6-7 remain planned.
 **Scope:** `unfurl-foundry-substrate`, `unfurl-foundry`, and the narrow `unfurl-flow` `agentRef` integration.
 **Governing design:** `HLD-unfurl-foundry-substrate.md`, `LLD-unfurl-foundry-substrate-java.md`, and the repository build specs.
 
@@ -123,6 +123,8 @@
 - Flow passes resolved metadata unchanged and still imports no provider SDK.
 
 ## Slice 5: Deterministic Tool Interceptor Chain
+
+**Status:** Implemented in `unfurl-foundry-substrate` and `unfurl-foundry`.
 
 **Goal:** enforce prerequisites, approval, permission, normalization, and redaction around every tool call.
 

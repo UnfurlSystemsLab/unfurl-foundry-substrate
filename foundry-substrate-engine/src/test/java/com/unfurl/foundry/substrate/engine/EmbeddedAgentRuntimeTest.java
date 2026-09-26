@@ -14,6 +14,9 @@ import com.unfurl.foundry.substrate.model.ModelUsage;
 import com.unfurl.foundry.substrate.model.MessageRole;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
 import com.unfurl.foundry.substrate.ports.ToolCallResult;
+import com.unfurl.foundry.substrate.ports.ToolCallDecision;
+import com.unfurl.foundry.substrate.ports.ToolCallInterceptor;
+import com.unfurl.foundry.substrate.ports.ToolCallInterceptorChain;
 import com.unfurl.foundry.substrate.runstate.AgentPhaseStatus;
 import com.unfurl.foundry.substrate.runstate.AgentRunState;
 import com.unfurl.foundry.substrate.runstate.AgentRunStatus;
@@ -34,6 +37,45 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EmbeddedAgentRuntimeTest {
+
+    /** A policy denial stops the tool call before registry execution. */
+    @Test
+    void interceptorDenialNeverReachesToolExecutor() {
+        StaticProviderRegistry providers = new StaticProviderRegistry()
+                .registerModel("model", new ScriptedModelProvider(List.of(
+                        response("tool", List.of(new ModelToolCall("call-1", "lookup", Map.of()))))));
+        RecordingToolExecutor executor = new RecordingToolExecutor(Map.of("ok", true));
+        DefaultToolRegistry tools = new DefaultToolRegistry();
+        tools.register("lookup", executor);
+        ToolCallInterceptor deny = new ToolCallInterceptor() {
+            /** Denies the call with a deterministic prerequisite failure. */
+            @Override
+            public ToolCallDecision before(
+                    com.unfurl.foundry.substrate.ports.ToolCallRequest request, ExecutionContext context) {
+                return ToolCallDecision.deny(request.arguments(), StructuredFailure.terminal(
+                        "PREREQUISITE_MISSING", FailureCategory.AUTHORIZATION, "token required"), Map.of());
+            }
+
+            /** Leaves results unchanged; execution is unreachable for this policy. */
+            @Override
+            public ToolCallResult after(
+                    com.unfurl.foundry.substrate.ports.ToolCallRequest request,
+                    ToolCallResult result,
+                    ExecutionContext context) {
+                return result;
+            }
+        };
+        EmbeddedAgentRuntime runtime = runtimeWithChain(
+                providers, tools, new ToolCallInterceptorChain(List.of(deny)));
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(),
+                List.of(phase("first", Map.of("prompt", "lookup"), List.of("lookup"), 1)),
+                List.of(), Map.of(), "model", List.of("lookup"));
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.errorCode()).isEqualTo("PREREQUISITE_MISSING");
+        assertThat(executor.calls()).isEmpty();
+    }
 
     @Test
     void treatsStringFalseConditionAsFalseAndSkipsDownstreamPhase() {
@@ -437,6 +479,18 @@ class EmbeddedAgentRuntimeTest {
 
     private AgentPhase phase(String id, Map<String, Object> input, List<String> allowedTools, int maxToolIterations) {
         return new AgentPhase(id, null, null, allowedTools, null, input, Map.of(), List.of(), maxToolIterations);
+    }
+
+    /** Fixture Factory: constructs the full runtime with a selected tool interceptor chain. */
+    private EmbeddedAgentRuntime runtimeWithChain(
+            StaticProviderRegistry providers,
+            DefaultToolRegistry tools,
+            ToolCallInterceptorChain chain) {
+        return new EmbeddedAgentRuntime(
+                providers, tools, null, new com.unfurl.foundry.substrate.guardrail.BudgetPolicyCostGuardrail(),
+                new AllowAllPermissionBridge(), null, new com.unfurl.foundry.substrate.prompt.PromptAssembler(),
+                new com.unfurl.foundry.substrate.resolver.DataReferenceResolver(),
+                new com.unfurl.foundry.substrate.agent.AgentDefinitionValidator(), null, Map.of(), chain);
     }
 
     private ModelResponse response(String content, List<ModelToolCall> toolCalls) {
