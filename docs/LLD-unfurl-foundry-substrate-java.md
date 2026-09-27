@@ -333,7 +333,7 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 
 `AgentDelegationRequest` and `AgentDelegationResult`
 
-- The request contains pinned `agentRef`, objective, explicit context projection, source refs, expected output schema, budget envelope, permission scope, additive `toolScope`, and metadata. The compatibility constructor defaults `toolScope` to the child's declared tools for one migration window.
+- The request contains pinned `agentRef`, objective, explicit context projection, source refs, expected output schema, budget envelope, permission scope, additive `toolScope`, and metadata. The compatibility constructor and an absent/null serialized field inherit the child's declared tools for one migration window; an explicit empty list grants no tools.
 - The result contains the child's terminal envelope or structured failure, effective child budget/permissions/tools, cost accounting, provenance, and metadata. Successful empty output remains a successful terminal envelope; partial failure remains in `StructuredFailure.partialOutput`.
 - Effective tools are the stable intersection of the child's declared tools and the requested `toolScope`. Phase-level tool references are narrowed by the same set. A requested undeclared tool fails validation before child execution; a delegate never adds a tool or permission.
 

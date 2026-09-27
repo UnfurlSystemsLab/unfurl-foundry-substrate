@@ -15,8 +15,18 @@ public record AgentDelegationRequest(
         String expectedOutputSchemaRef,
         BudgetPolicy budgetEnvelope,
         List<String> permissionScope,
+        List<String> toolScope,
         Map<String, Object> metadata
 ) {
+    /** Compatibility constructor: preserves pre-tool-scope callers by inheriting declared child tools. */
+    public AgentDelegationRequest(String agentRef, String objective, Map<String, Object> contextProjection,
+                                  List<String> sourceRefs, String expectedOutputSchemaRef,
+                                  BudgetPolicy budgetEnvelope, List<String> permissionScope,
+                                  Map<String, Object> metadata) {
+        this(agentRef, objective, contextProjection, sourceRefs, expectedOutputSchemaRef,
+                budgetEnvelope, permissionScope, null, metadata);
+    }
+
     /** Canonical constructor: requires a pinned reference and freezes all boundary values. */
     public AgentDelegationRequest {
         if (agentRef == null || !agentRef.matches("[^@\\s]+@[^@\\s]+")) {
@@ -27,6 +37,10 @@ public record AgentDelegationRequest(
         sourceRefs = sourceRefs == null ? List.of() : List.copyOf(sourceRefs);
         budgetEnvelope = budgetEnvelope == null ? BudgetPolicy.none() : budgetEnvelope;
         permissionScope = permissionScope == null ? List.of() : List.copyOf(permissionScope);
+        toolScope = toolScope == null ? null : List.copyOf(toolScope);
         metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
     }
+
+    /** Query: distinguishes an explicit empty tool scope from compatibility inheritance. */
+    public boolean hasExplicitToolScope() { return toolScope != null; }
 }
