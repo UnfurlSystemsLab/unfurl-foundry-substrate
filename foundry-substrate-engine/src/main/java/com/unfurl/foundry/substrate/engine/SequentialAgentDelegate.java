@@ -1,6 +1,7 @@
 package com.unfurl.foundry.substrate.engine;
 
 import com.unfurl.foundry.substrate.agent.AgentDefinition;
+import com.unfurl.foundry.substrate.agent.AgentPhase;
 import com.unfurl.foundry.substrate.agent.BudgetPolicy;
 import com.unfurl.foundry.substrate.delegation.AgentDelegationRequest;
 import com.unfurl.foundry.substrate.delegation.AgentDelegationResult;
@@ -19,6 +20,7 @@ import com.unfurl.substrate.policy.ExecutionContext;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 
@@ -56,12 +58,22 @@ public final class SequentialAgentDelegate implements AgentDelegate {
         AgentDefinition child = resolver.resolve(pinned[0], pinned[1], caller).orElse(null);
         if (child == null) {
             return failure("AGENT_NOT_FOUND", FailureCategory.NOT_FOUND, false,
-                    "Pinned child agent was not found", Map.of(), BudgetPolicy.none(), List.of(), request);
+                    "Pinned child agent was not found", Map.of(), BudgetPolicy.none(), List.of(), List.of(), request);
         }
 
         BudgetPolicy effectiveBudget = lowerOf(request.budgetEnvelope(), child.budgetPolicy());
         List<String> effectivePermissions = caller.permissions().stream()
                 .filter(request.permissionScope()::contains).distinct().toList();
+        List<String> declaredTools = declaredTools(child);
+        if (request.hasExplicitToolScope() && !declaredTools.containsAll(request.toolScope())) {
+            return failure("CHILD_TOOL_SCOPE_INVALID", FailureCategory.AUTHORIZATION, false,
+                    "Requested child tool scope contains undeclared tools", Map.of(), effectiveBudget,
+                    effectivePermissions, List.of(), request);
+        }
+        List<String> effectiveTools = request.hasExplicitToolScope()
+                ? declaredTools.stream().filter(request.toolScope()::contains).toList()
+                : declaredTools;
+        AgentDefinition narrowedChild = narrowTools(child, effectiveTools);
         Map<String, Object> childInput = projectedInput(request);
         Map<String, Object> childMetadata = new LinkedHashMap<>();
         childMetadata.put("agentBudgetPolicy", effectiveBudget);
@@ -72,12 +84,12 @@ public final class SequentialAgentDelegate implements AgentDelegate {
 
         AgentRunState run;
         try {
-            run = runtime.start(child, childInput, childContext);
+            run = runtime.start(narrowedChild, childInput, childContext);
         } catch (RuntimeException exception) {
             return failure("CHILD_RUNTIME_FAILED", FailureCategory.TRANSIENT, true,
-                    "Child runtime failed", Map.of(), effectiveBudget, effectivePermissions, request);
+                    "Child runtime failed", Map.of(), effectiveBudget, effectivePermissions, effectiveTools, request);
         }
-        Map<String, Object> output = lastOutput(child, run);
+        Map<String, Object> output = lastOutput(narrowedChild, run);
         CostAccounting cost = run.cost() == null ? CostAccounting.empty(Map.of("agentRef", request.agentRef())) : run.cost();
         Map<String, Object> provenance = Map.of("agentRef", request.agentRef(), "runId", run.runId());
 
@@ -85,10 +97,10 @@ public final class SequentialAgentDelegate implements AgentDelegate {
             AgentTerminalEnvelope terminal = terminalNormalizer.normalize(output);
             if (terminal.status() == AgentTerminalStatus.FAILED) {
                 return new AgentDelegationResult(null, terminal.error(), effectiveBudget,
-                        effectivePermissions, cost, provenance, request.metadata());
+                        effectivePermissions, effectiveTools, cost, provenance, request.metadata());
             }
             return new AgentDelegationResult(terminal, null, effectiveBudget,
-                    effectivePermissions, cost, provenance, request.metadata());
+                    effectivePermissions, effectiveTools, cost, provenance, request.metadata());
         }
         FailureCategory category = run.status() == com.unfurl.foundry.substrate.runstate.AgentRunStatus.CANCELLED
                 ? FailureCategory.BUSINESS_RULE : FailureCategory.INTERNAL;
@@ -97,7 +109,26 @@ public final class SequentialAgentDelegate implements AgentDelegate {
                 textOr(run.errorMessage(), "Child agent did not complete"), output,
                 Map.of("status", run.status().name()), provenance);
         return new AgentDelegationResult(null, failure, effectiveBudget,
-                effectivePermissions, cost, provenance, request.metadata());
+                effectivePermissions, effectiveTools, cost, provenance, request.metadata());
+    }
+
+    /** Selector: derives the complete stable child-declared tool set from agent and phase declarations. */
+    private List<String> declaredTools(AgentDefinition child) {
+        LinkedHashSet<String> declared = new LinkedHashSet<>(child.toolRefs());
+        child.phases().forEach(phase -> declared.addAll(phase.allowedToolRefs()));
+        return List.copyOf(declared);
+    }
+
+    /** Projector: creates a child definition whose agent- and phase-level tools cannot exceed effective scope. */
+    private AgentDefinition narrowTools(AgentDefinition child, List<String> effectiveTools) {
+        List<AgentPhase> phases = child.phases().stream().map(phase -> new AgentPhase(
+                phase.id(), phase.promptTemplateRef(), phase.modelRef(),
+                phase.allowedToolRefs().stream().filter(effectiveTools::contains).toList(),
+                phase.ragQueryRef(), phase.input(), phase.outputMapping(), phase.dependencies(),
+                phase.maxToolIterations(), phase.skillRefs(), phase.outputSchemaRef(),
+                phase.semanticValidatorRef(), phase.correctionPolicy())).toList();
+        return new AgentDefinition(child.id(), child.version(), child.metadata(), phases, child.edges(),
+                child.inputSchema(), child.defaultModelRef(), effectiveTools, child.budgetPolicy(), child.skillRefs());
     }
 
     /** Projector: constructs the complete and exclusive child input contract. */
@@ -125,10 +156,11 @@ public final class SequentialAgentDelegate implements AgentDelegate {
     private AgentDelegationResult failure(String code, FailureCategory category, boolean retryable,
                                           String message, Map<String, Object> partialOutput,
                                           BudgetPolicy budget, List<String> permissions,
+                                          List<String> tools,
                                           AgentDelegationRequest request) {
         StructuredFailure failure = new StructuredFailure(code, category, retryable, null, message,
                 partialOutput, Map.of(), Map.of("agentRef", request.agentRef()));
-        return new AgentDelegationResult(null, failure, budget, permissions,
+        return new AgentDelegationResult(null, failure, budget, permissions, tools,
                 CostAccounting.empty(Map.of("agentRef", request.agentRef())), failure.provenance(), request.metadata());
     }
 

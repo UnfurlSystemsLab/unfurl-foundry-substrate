@@ -15,10 +15,19 @@ public record AgentDelegationResult(
         StructuredFailure failure,
         BudgetPolicy effectiveBudget,
         List<String> effectivePermissions,
+        List<String> effectiveTools,
         CostAccounting cost,
         Map<String, Object> provenance,
         Map<String, Object> metadata
 ) {
+    /** Compatibility constructor: preserves the pre-tool-scope result shape. */
+    public AgentDelegationResult(AgentTerminalEnvelope terminal, StructuredFailure failure,
+                                 BudgetPolicy effectiveBudget, List<String> effectivePermissions,
+                                 CostAccounting cost, Map<String, Object> provenance,
+                                 Map<String, Object> metadata) {
+        this(terminal, failure, effectiveBudget, effectivePermissions, List.of(), cost, provenance, metadata);
+    }
+
     /** Canonical constructor: enforces an exclusive terminal-or-failure result. */
     public AgentDelegationResult {
         if ((terminal == null) == (failure == null)) {
@@ -26,6 +35,7 @@ public record AgentDelegationResult(
         }
         effectiveBudget = effectiveBudget == null ? BudgetPolicy.none() : effectiveBudget;
         effectivePermissions = effectivePermissions == null ? List.of() : List.copyOf(effectivePermissions);
+        effectiveTools = effectiveTools == null ? List.of() : List.copyOf(effectiveTools);
         provenance = provenance == null ? Map.of() : Map.copyOf(provenance);
         metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
     }
