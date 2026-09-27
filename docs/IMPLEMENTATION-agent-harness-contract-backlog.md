@@ -1,6 +1,6 @@
 # Implementation Backlog: Graph-Backed Agent Harness Contracts
 
-**Status:** Approved architecture translated into implementation slices. Slices 1-5 are implemented; Slices 6-7 remain planned.
+**Status:** Approved architecture translated into implementation slices. Slices 1-7 are implemented and verified.
 **Scope:** `unfurl-foundry-substrate`, `unfurl-foundry`, and the narrow `unfurl-flow` `agentRef` integration.
 **Governing design:** `HLD-unfurl-foundry-substrate.md`, `LLD-unfurl-foundry-substrate-java.md`, and the repository build specs.
 
@@ -151,6 +151,8 @@
 
 ## Slice 6: Schema And Semantic Validation
 
+**Status:** Implemented in `unfurl-foundry-substrate` and `unfurl-foundry`.
+
 **Goal:** guarantee output shape and validate meaning with bounded correction.
 
 ### `unfurl-foundry-substrate`
@@ -173,6 +175,8 @@
 - No validation path can loop without finite attempt and time bounds.
 
 ## Slice 7: Context Policy, Delegation, And MCP Adapter
+
+**Status:** Implemented and verified in `unfurl-foundry-substrate` and `unfurl-foundry`.
 
 **Goal:** add explicit context control and governed coordinator/subagent execution, then expose MCP through neutral ports.
 
