@@ -273,9 +273,10 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 
 `AgentPhase`
 
-- Fields: `id`, `promptTemplateRef`, `modelRef`, `allowedToolRefs`, `ragQueryRef`, `input`, `outputMapping`, `dependencies`, `maxToolIterations`.
+- Fields: `id`, `promptTemplateRef`, `modelRef`, `allowedToolRefs`, `ragQueryRef`, `input`, `outputMapping`, `dependencies`, `maxToolIterations`, `skillRefs`, optional `outputSchemaRef`, optional `semanticValidatorRef`, and `correctionPolicy`.
 - A phase is one bounded reasoning step: assemble a prompt, optionally retrieve, call the model, optionally call tools, produce structured output.
 - `maxToolIterations` bounds the tool-call loop within a phase. It is a control-flow primitive, not a capability name.
+- `CorrectionPolicy` bounds validation repair by both attempt count and elapsed duration and selects fail or escalation on exhaustion. A zero-attempt policy performs validation without another model call.
 
 `ToolDefinition`
 
@@ -316,8 +317,14 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 
 `ContextPolicy`
 
-- Fields: history selector, pinned-fact refs, summary refs, tool-result retention policy, provenance retention policy, token allocation, and metadata.
+- Fields: selected history refs, pinned-fact refs, summary refs, tool-result retention flag, provenance retention flag, positive token allocation, and metadata.
 - Context assembly is explicit and reproducible from invocation input, prior structured outputs, selected history, summaries, and retrieved material. No port may silently read or write global model memory.
+
+`ContextSelectionRequest`, `ContextSelectionResult`, and `ContextResource`
+
+- The request carries only explicitly supplied input, history, pinned facts, summaries, tool results, provenance, resource refs, and `ContextPolicy`.
+- The result carries the compacted context map, selected read-only resources, retained provenance, estimated token count, unresolved waits, and metadata.
+- Pinned facts, unresolved questions/approvals, governance metadata, definition digest, and retained provenance are mandatory compaction invariants. If mandatory material exceeds the token allocation, selection fails closed rather than dropping it.
 
 `StructuredFailure`
 
@@ -326,8 +333,8 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 
 `AgentDelegationRequest` and `AgentDelegationResult`
 
-- The request contains pinned `agentRef`, objective, explicit context projection, expected output schema, budget envelope, permission scope, and metadata.
-- The result contains the child's terminal envelope and provenance. A child receives no implicit parent transcript or sibling output.
+- The request contains pinned `agentRef`, objective, explicit context projection, source refs, expected output schema, budget envelope, permission scope, and metadata.
+- The result contains the child's terminal envelope or structured failure, effective child budget/permissions, cost accounting, provenance, and metadata. Successful empty output remains a successful terminal envelope; partial failure remains in `StructuredFailure.partialOutput`.
 
 Statuses:
 
@@ -402,6 +409,14 @@ public interface SemanticValidator {
     ValidationResult validate(Object value, Map<String, Object> source, ExecutionContext context);
 }
 
+public interface OutputSchemaValidator {
+    ValidationResult validate(String schemaRef, Object value, ExecutionContext context);
+}
+
+public interface SemanticValidatorRegistry {
+    Optional<SemanticValidator> resolve(String validatorRef, ExecutionContext context);
+}
+
 public interface AgentDelegate {
     AgentDelegationResult invoke(AgentDelegationRequest request, ExecutionContext context);
 }
@@ -426,7 +441,12 @@ durable Foundry host persists the approval request and re-enters with a one-time
 
 `SemanticValidator` is separate from JSON-schema validation. Schema validation establishes shape before or after projection; semantic validation checks claims such as totals, ranges, source grounding, and domain invariants. A phase may attach a bounded correction policy that feeds specific validation failures into another model turn. Exhaustion returns `VALIDATION_FAILED` or an escalation envelope, never an unbounded retry loop.
 
+`OutputSchemaValidator` is the structural-validation port because schema resolution belongs to the host. The embedded runtime validates the raw structured output first, applies `outputMapping`, and only then resolves and invokes `semanticValidatorRef`. Missing declared schema or semantic bindings fail closed. Correction feedback is a provider-neutral JSON issue list appended as a user message; every retry re-enters the same structural, mapping, and semantic sequence. Both `maxAttempts` and `maxDurationMillis` are hard upper bounds.
+Each rejected output emits `OUTPUT_VALIDATION_FAILED`; each permitted repair turn emits `OUTPUT_CORRECTION_REQUESTED` before the model call. Event metadata contains issue codes and attempt counters, never the rejected business payload.
+
 `AgentDelegate` is the Strategy port for coordinator/subagent invocation. The embedded strategy is sequential. Foundry may provide a concurrent and durable implementation, but must enforce explicit context projection, pinned references, lower-of budgets, permission intersection, and structured child failure propagation.
+
+`SequentialAgentDelegate` resolves only pinned child references, constructs child input solely from objective, explicit context projection, declared sources, and expected schema, intersects requested permissions with the caller context, and composes every budget dimension using the lower non-null ceiling. It invokes children sequentially through `AgentRuntime`; it never copies a parent transcript or sibling result.
 
 `ContextResourceProvider` is the read-only resource boundary for files, documents, schemas, and MCP resources selected into context. A resource has stable identity, media type, content or content reference, provenance, and metadata. Resource discovery, transport, credentials, caching, and persistence remain adapter/product responsibilities.
 

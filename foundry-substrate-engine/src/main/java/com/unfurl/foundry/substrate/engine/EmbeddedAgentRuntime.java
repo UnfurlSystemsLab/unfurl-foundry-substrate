@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.unfurl.foundry.substrate.agent.AgentDefinition;
 import com.unfurl.foundry.substrate.agent.AgentDefinitionValidator;
 import com.unfurl.foundry.substrate.agent.AgentPhase;
+import com.unfurl.foundry.substrate.agent.CorrectionExhaustionAction;
 import com.unfurl.foundry.substrate.events.AgentEvent;
 import com.unfurl.foundry.substrate.events.AgentEventType;
 import com.unfurl.foundry.substrate.guardrail.CostGuardrail;
@@ -22,8 +23,11 @@ import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.ports.AgentEventSink;
 import com.unfurl.foundry.substrate.ports.AgentRuntime;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
+import com.unfurl.foundry.substrate.ports.OutputSchemaValidator;
 import com.unfurl.foundry.substrate.ports.ProviderRegistry;
 import com.unfurl.foundry.substrate.ports.RagRetriever;
+import com.unfurl.foundry.substrate.ports.SemanticValidator;
+import com.unfurl.foundry.substrate.ports.SemanticValidatorRegistry;
 import com.unfurl.foundry.substrate.ports.ToolCallRequest;
 import com.unfurl.foundry.substrate.ports.ToolCallDecision;
 import com.unfurl.foundry.substrate.ports.ToolCallDecisionType;
@@ -31,6 +35,8 @@ import com.unfurl.foundry.substrate.ports.ToolCallInterceptorChain;
 import com.unfurl.foundry.substrate.ports.ToolCallResult;
 import com.unfurl.foundry.substrate.ports.ToolExecutor;
 import com.unfurl.foundry.substrate.ports.ToolRegistry;
+import com.unfurl.foundry.substrate.ports.ValidationIssue;
+import com.unfurl.foundry.substrate.ports.ValidationResult;
 import com.unfurl.foundry.substrate.prompt.PromptAssembler;
 import com.unfurl.foundry.substrate.prompt.PromptTemplate;
 import com.unfurl.foundry.substrate.rag.Chunk;
@@ -77,6 +83,8 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     private final CostGuardrail costGuardrail;
     private final PermissionBridge permissionBridge;
     private final ToolCallInterceptorChain toolCallInterceptors;
+    private final OutputSchemaValidator outputSchemaValidator;
+    private final SemanticValidatorRegistry semanticValidatorRegistry;
     private final AgentEventSink eventSink;
     private final PromptAssembler promptAssembler;
     private final DataReferenceResolver resolver;
@@ -90,7 +98,8 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     public EmbeddedAgentRuntime(ProviderRegistry providerRegistry, ToolRegistry toolRegistry) {
         this(providerRegistry, toolRegistry, null, new BudgetPolicyCostGuardrail(), new AllowAllPermissionBridge(),
                 defaultEventSink(), new PromptAssembler(), new DataReferenceResolver(),
-                new AgentDefinitionValidator(), defaultStore(), Map.of(), ToolCallInterceptorChain.empty());
+                new AgentDefinitionValidator(), defaultStore(), Map.of(), ToolCallInterceptorChain.empty(),
+                null, null);
     }
 
 /**
@@ -110,7 +119,8 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             Map<String, PromptTemplate> templates
     ) {
         this(providerRegistry, toolRegistry, ragRetriever, costGuardrail, permissionBridge, eventSink,
-                promptAssembler, resolver, validator, store, templates, ToolCallInterceptorChain.empty());
+                promptAssembler, resolver, validator, store, templates, ToolCallInterceptorChain.empty(),
+                null, null);
     }
 
     /**
@@ -131,6 +141,30 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             Map<String, PromptTemplate> templates,
             ToolCallInterceptorChain toolCallInterceptors
     ) {
+        this(providerRegistry, toolRegistry, ragRetriever, costGuardrail, permissionBridge, eventSink,
+                promptAssembler, resolver, validator, store, templates, toolCallInterceptors, null, null);
+    }
+
+    /**
+     * Constructs the runtime with host-owned structural and semantic validation ports. Declared
+     * validation references fail closed when either port cannot resolve its binding.
+     */
+    public EmbeddedAgentRuntime(
+            ProviderRegistry providerRegistry,
+            ToolRegistry toolRegistry,
+            RagRetriever ragRetriever,
+            CostGuardrail costGuardrail,
+            PermissionBridge permissionBridge,
+            AgentEventSink eventSink,
+            PromptAssembler promptAssembler,
+            DataReferenceResolver resolver,
+            AgentDefinitionValidator validator,
+            AgentRunStore store,
+            Map<String, PromptTemplate> templates,
+            ToolCallInterceptorChain toolCallInterceptors,
+            OutputSchemaValidator outputSchemaValidator,
+            SemanticValidatorRegistry semanticValidatorRegistry
+    ) {
         this.providerRegistry = providerRegistry;
         this.toolRegistry = toolRegistry;
         this.ragRetriever = ragRetriever;
@@ -138,6 +172,8 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         this.permissionBridge = permissionBridge;
         this.toolCallInterceptors = toolCallInterceptors == null
                 ? ToolCallInterceptorChain.empty() : toolCallInterceptors;
+        this.outputSchemaValidator = outputSchemaValidator;
+        this.semanticValidatorRegistry = semanticValidatorRegistry;
         this.eventSink = eventSink == null ? defaultEventSink() : eventSink;
         this.promptAssembler = promptAssembler;
         this.resolver = resolver;
@@ -394,6 +430,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                     messages,
                     response.message() == null ? "" : response.message().content(),
                     toolCalls,
+                    context,
                     started);
             if (mappedToolPhase.isPresent()) {
                 return mappedToolPhase.get();
@@ -412,12 +449,172 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         }
 
         String content = response.message() == null ? "" : response.message().content();
-        PhaseOutput output = buildPhaseOutput(phase, content == null ? "" : content, toolCalls);
-        if (!output.success()) {
-            return failedPhase(phase.id(), resolvedInput, messages, output.errorCode(), output.errorMessage(), started);
+        return validateAndCorrectPhase(state, phase, provider, modelRef, resolvedInput, messages,
+                toolCalls, content == null ? "" : content, context, started);
+    }
+
+    /**
+     * Validation Pipeline: enforces structural, mapping, and semantic ordering and performs only
+     * the finite correction turns allowed by the phase policy.
+     */
+    private AgentPhaseState validateAndCorrectPhase(
+            State state,
+            AgentPhase phase,
+            ModelProvider provider,
+            String modelRef,
+            Map<String, Object> resolvedInput,
+            List<Message> messages,
+            List<ToolCall> toolCalls,
+            String initialContent,
+            ExecutionContext context,
+            Instant started) {
+        String content = initialContent;
+        Instant correctionStarted = Instant.now();
+        int attempts = 0;
+        while (true) {
+            OutputValidation validation = validateOutput(phase, content, toolCalls, context);
+            if (validation.valid()) {
+                return completedPhase(phase, resolvedInput, messages, toolCalls, validation.output(), started);
+            }
+            emit(context, state, phase.id(), AgentEventType.OUTPUT_VALIDATION_FAILED, Map.of(
+                    "issueCodes", validation.issues().stream().map(ValidationIssue::code).toList(),
+                    "attempt", attempts));
+            boolean withinAttempts = attempts < phase.correctionPolicy().maxAttempts();
+            boolean withinDuration = phase.correctionPolicy().maxDurationMillis() == 0
+                    || java.time.Duration.between(correctionStarted, Instant.now()).toMillis()
+                    < phase.correctionPolicy().maxDurationMillis();
+            if (!withinAttempts || !withinDuration) {
+                return exhaustedValidation(phase, resolvedInput, messages, toolCalls, validation, started);
+            }
+            attempts++;
+            emit(context, state, phase.id(), AgentEventType.OUTPUT_CORRECTION_REQUESTED,
+                    Map.of("attempt", attempts));
+            messages.add(Message.user(correctionFeedback(validation.issues(), attempts)));
+            ModelCallOutcome corrected = callModelOutcome(
+                    state, phase, provider, messages, modelRef, context, resolvedInput, started);
+            if (!corrected.success()) {
+                return corrected.failure();
+            }
+            ModelResponse response = corrected.response();
+            if (java.time.Duration.between(correctionStarted, Instant.now()).toMillis()
+                    >= phase.correctionPolicy().maxDurationMillis()) {
+                return exhaustedValidation(
+                        phase, resolvedInput, messages, toolCalls, validation, started);
+            }
+            if (response.hasToolCalls()) {
+                return failedPhase(phase.id(), resolvedInput, messages,
+                        "VALIDATION_CORRECTION_TOOL_REQUESTED",
+                        "Correction turn requested tools instead of corrected structured output", started);
+            }
+            messages.add(response.message() == null ? Message.assistant("") : response.message());
+            content = response.message() == null ? "" : response.message().content();
         }
-        return new AgentPhaseState(phase.id(), AgentPhaseStatus.COMPLETED, resolvedInput, List.copyOf(messages),
-                List.copyOf(toolCalls), output.values(), null, null, started, Instant.now());
+    }
+
+    /** Validation Pipeline step: structural schema, output mapping, then semantic validation. */
+    private OutputValidation validateOutput(
+            AgentPhase phase, String content, List<ToolCall> toolCalls, ExecutionContext context) {
+        Map<String, Object> raw = rawPhaseOutput(content);
+        if (phase.outputSchemaRef() != null && !phase.outputSchemaRef().isBlank()) {
+            if (outputSchemaValidator == null) {
+                return OutputValidation.invalid(List.of(new ValidationIssue(
+                        "OUTPUT_SCHEMA_BINDING_MISSING", "$", "No output schema validator is bound", Map.of())));
+            }
+            Object structured = raw.getOrDefault("json", raw);
+            ValidationResult structural;
+            try {
+                structural = outputSchemaValidator.validate(phase.outputSchemaRef(), structured, context);
+            } catch (RuntimeException exception) {
+                return OutputValidation.invalid(List.of(new ValidationIssue(
+                        "OUTPUT_SCHEMA_VALIDATOR_FAILED", "$",
+                        "Output schema validator failed", Map.of())));
+            }
+            if (!structural.valid()) {
+                return OutputValidation.invalid(structural.issues());
+            }
+        }
+        PhaseOutput mapped = applyOutputMapping(phase, raw, toolCalls);
+        if (!mapped.success()) {
+            return OutputValidation.invalid(List.of(new ValidationIssue(
+                    mapped.errorCode(), "$", mapped.errorMessage(), Map.of())));
+        }
+        if (phase.semanticValidatorRef() != null && !phase.semanticValidatorRef().isBlank()) {
+            if (semanticValidatorRegistry == null) {
+                return OutputValidation.invalid(List.of(new ValidationIssue(
+                        "SEMANTIC_VALIDATOR_BINDING_MISSING", "$",
+                        "No semantic validator registry is bound", Map.of())));
+            }
+            SemanticValidator semantic = semanticValidatorRegistry
+                    .resolve(phase.semanticValidatorRef(), context).orElse(null);
+            if (semantic == null) {
+                return OutputValidation.invalid(List.of(new ValidationIssue(
+                        "SEMANTIC_VALIDATOR_MISSING", "$",
+                        "Semantic validator is not registered: " + phase.semanticValidatorRef(), Map.of())));
+            }
+            ValidationResult result;
+            try {
+                result = semantic.validate(mapped.values(), raw, context);
+            } catch (RuntimeException exception) {
+                return OutputValidation.invalid(List.of(new ValidationIssue(
+                        "SEMANTIC_VALIDATOR_FAILED", "$", "Semantic validator failed", Map.of())));
+            }
+            if (!result.valid()) {
+                return OutputValidation.invalid(result.issues());
+            }
+        }
+        return OutputValidation.valid(mapped.values());
+    }
+
+    /** Exhaustion Strategy: returns either a structured failure or an escalation terminal output. */
+    private AgentPhaseState exhaustedValidation(
+            AgentPhase phase,
+            Map<String, Object> resolvedInput,
+            List<Message> messages,
+            List<ToolCall> toolCalls,
+            OutputValidation validation,
+            Instant started) {
+        if (phase.correctionPolicy().exhaustionAction() == CorrectionExhaustionAction.ESCALATE) {
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("kind", "escalated");
+            output.put("reason", "validation correction exhausted");
+            output.put("validationIssues", issueMaps(validation.issues()));
+            return completedPhase(phase, resolvedInput, messages, toolCalls, output, started);
+        }
+        String errorCode = validation.issues().size() == 1
+                && "OUTPUT_MAPPING_UNRESOLVED".equals(validation.issues().getFirst().code())
+                ? "OUTPUT_MAPPING_UNRESOLVED" : "VALIDATION_FAILED";
+        return failedPhase(phase.id(), resolvedInput, messages, errorCode,
+                validation.issues().stream().map(ValidationIssue::message)
+                        .collect(java.util.stream.Collectors.joining("; ")), started);
+    }
+
+    /** Factory: creates the immutable successful phase snapshot shared by validation paths. */
+    private AgentPhaseState completedPhase(
+            AgentPhase phase,
+            Map<String, Object> resolvedInput,
+            List<Message> messages,
+            List<ToolCall> toolCalls,
+            Map<String, Object> output,
+            Instant started) {
+        return new AgentPhaseState(phase.id(), AgentPhaseStatus.COMPLETED, resolvedInput,
+                List.copyOf(messages), List.copyOf(toolCalls), output, null, null, started, Instant.now());
+    }
+
+    /** Feedback Adapter: serializes only precise, sanitized issues into the correction turn. */
+    private String correctionFeedback(List<ValidationIssue> issues, int attempt) {
+        try {
+            return "Correct the structured output. Return only the corrected result. Validation attempt "
+                    + attempt + " issues: " + MAPPER.writeValueAsString(issueMaps(issues));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("could not serialize validation feedback", exception);
+        }
+    }
+
+    /** Projection helper: converts immutable validation issues to provider-neutral JSON maps. */
+    private List<Map<String, Object>> issueMaps(List<ValidationIssue> issues) {
+        return issues.stream().map(issue -> Map.<String, Object>of(
+                "code", issue.code(), "path", issue.path(), "message", issue.message()))
+                .toList();
     }
 
 /**
@@ -430,6 +627,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             List<Message> messages,
             String content,
             List<ToolCall> toolCalls,
+            ExecutionContext context,
             Instant started
     ) {
         if (phase.outputMapping().isEmpty() || toolCalls.isEmpty()) {
@@ -438,6 +636,14 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         PhaseOutput output = buildPhaseOutput(phase, content == null ? "" : content, toolCalls);
         if (!output.success()) {
             return java.util.Optional.empty();
+        }
+        if ((phase.outputSchemaRef() != null && !phase.outputSchemaRef().isBlank())
+                || (phase.semanticValidatorRef() != null && !phase.semanticValidatorRef().isBlank())) {
+            OutputValidation validation = validateOutput(phase, content, toolCalls, context);
+            if (!validation.valid()) {
+                return java.util.Optional.empty();
+            }
+            output = PhaseOutput.success(validation.output());
         }
         return java.util.Optional.of(new AgentPhaseState(
                 phase.id(),
@@ -457,9 +663,13 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
  */
     @SuppressWarnings("unchecked")
     private PhaseOutput buildPhaseOutput(AgentPhase phase, String content, List<ToolCall> toolCalls) {
+        return applyOutputMapping(phase, rawPhaseOutput(content), toolCalls);
+    }
+
+    /** Builder: exposes raw text and parsed JSON before any output mapping is evaluated. */
+    private Map<String, Object> rawPhaseOutput(String content) {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("content", content);
-
         parseJsonObject(content).ifPresent(parsed -> {
             output.put("json", parsed);
             parsed.forEach((key, value) -> {
@@ -468,6 +678,13 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 }
             });
         });
+        return output;
+    }
+
+    /** Mapping Pipeline step: resolves declared output mappings against structurally valid output. */
+    private PhaseOutput applyOutputMapping(
+            AgentPhase phase, Map<String, Object> rawOutput, List<ToolCall> toolCalls) {
+        Map<String, Object> output = new LinkedHashMap<>(rawOutput);
 
         if (phase.outputMapping().isEmpty()) {
             return PhaseOutput.success(output);
@@ -1164,6 +1381,24 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
 
         boolean success() {
             return failure == null;
+        }
+    }
+
+    /** Value Object: carries either validated mapped output or correction-safe issues. */
+    private record OutputValidation(Map<String, Object> output, List<ValidationIssue> issues) {
+        /** Factory: creates a successful immutable output result. */
+        static OutputValidation valid(Map<String, Object> output) {
+            return new OutputValidation(Map.copyOf(output), List.of());
+        }
+
+        /** Factory: creates an invalid result with at least one issue. */
+        static OutputValidation invalid(List<ValidationIssue> issues) {
+            return new OutputValidation(Map.of(), List.copyOf(issues));
+        }
+
+        /** Predicate: reports whether validation produced mapped output. */
+        boolean valid() {
+            return issues.isEmpty();
         }
     }
 

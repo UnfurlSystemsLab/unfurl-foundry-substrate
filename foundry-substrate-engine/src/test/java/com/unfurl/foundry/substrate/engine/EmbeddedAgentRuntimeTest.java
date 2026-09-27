@@ -3,6 +3,8 @@ package com.unfurl.foundry.substrate.engine;
 import com.unfurl.foundry.substrate.agent.AgentDefinition;
 import com.unfurl.foundry.substrate.agent.AgentPhase;
 import com.unfurl.foundry.substrate.agent.BudgetPolicy;
+import com.unfurl.foundry.substrate.agent.CorrectionPolicy;
+import com.unfurl.foundry.substrate.agent.CorrectionExhaustionAction;
 import com.unfurl.foundry.substrate.guardrail.CostGuardrailContext;
 import com.unfurl.foundry.substrate.failure.FailureCategory;
 import com.unfurl.foundry.substrate.failure.StructuredFailure;
@@ -13,6 +15,8 @@ import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.model.ModelUsage;
 import com.unfurl.foundry.substrate.model.MessageRole;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
+import com.unfurl.foundry.substrate.ports.ValidationIssue;
+import com.unfurl.foundry.substrate.ports.ValidationResult;
 import com.unfurl.foundry.substrate.ports.ToolCallResult;
 import com.unfurl.foundry.substrate.ports.ToolCallDecision;
 import com.unfurl.foundry.substrate.ports.ToolCallInterceptor;
@@ -33,10 +37,72 @@ import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EmbeddedAgentRuntimeTest {
+
+    /** Structural rejection precedes semantic validation and precise feedback drives one repair. */
+    @Test
+    void validatesInOrderAndCorrectsWithinPolicy() {
+        ScriptedModelProvider model = new ScriptedModelProvider(List.of(
+                response("not-json", List.of()),
+                response("{\"amount\":2}", List.of())));
+        StaticProviderRegistry providers = new StaticProviderRegistry().registerModel("model", model);
+        AtomicInteger semanticCalls = new AtomicInteger();
+        EmbeddedAgentRuntime runtime = runtimeWithValidation(
+                providers,
+                (schemaRef, value, context) -> value instanceof Map<?, ?> map && map.get("amount") instanceof Number
+                        ? ValidationResult.success()
+                        : ValidationResult.invalid(List.of(new ValidationIssue(
+                        "AMOUNT_REQUIRED", "$.amount", "amount must be numeric", Map.of()))),
+                (validatorRef, context) -> Optional.of((value, source, executionContext) -> {
+                    semanticCalls.incrementAndGet();
+                    return ValidationResult.success();
+                }));
+        AgentPhase phase = validationPhase(new CorrectionPolicy(
+                1, 5_000, CorrectionExhaustionAction.FAIL, Map.of()));
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(), List.of(phase),
+                List.of(), Map.of(), "model", List.of());
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.COMPLETED);
+        assertThat(run.phases().get("validated").output()).containsEntry("amount", 2);
+        assertThat(semanticCalls).hasValue(1);
+        assertThat(run.phases().get("validated").messages()).anySatisfy(message ->
+                assertThat(message.content()).contains("AMOUNT_REQUIRED", "$.amount"));
+    }
+
+    /** Correction exhaustion is finite and returns the stable structured validation failure code. */
+    @Test
+    void failsAfterBoundedSemanticCorrection() {
+        ScriptedModelProvider model = new ScriptedModelProvider(List.of(
+                response("{\"amount\":-1}", List.of()),
+                response("{\"amount\":-2}", List.of())));
+        StaticProviderRegistry providers = new StaticProviderRegistry().registerModel("model", model);
+        AtomicInteger semanticCalls = new AtomicInteger();
+        EmbeddedAgentRuntime runtime = runtimeWithValidation(
+                providers,
+                (schemaRef, value, context) -> ValidationResult.success(),
+                (validatorRef, context) -> Optional.of((value, source, executionContext) -> {
+                    semanticCalls.incrementAndGet();
+                    return ValidationResult.invalid(List.of(new ValidationIssue(
+                            "AMOUNT_POSITIVE", "$.amount", "amount must be positive", Map.of())));
+                }));
+        AgentPhase phase = validationPhase(new CorrectionPolicy(
+                1, 5_000, CorrectionExhaustionAction.FAIL, Map.of()));
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(), List.of(phase),
+                List.of(), Map.of(), "model", List.of());
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(run.errorCode()).isEqualTo("VALIDATION_FAILED");
+        assertThat(semanticCalls).hasValue(2);
+    }
 
     /** A policy denial stops the tool call before registry execution. */
     @Test
@@ -491,6 +557,29 @@ class EmbeddedAgentRuntimeTest {
                 new AllowAllPermissionBridge(), null, new com.unfurl.foundry.substrate.prompt.PromptAssembler(),
                 new com.unfurl.foundry.substrate.resolver.DataReferenceResolver(),
                 new com.unfurl.foundry.substrate.agent.AgentDefinitionValidator(), null, Map.of(), chain);
+    }
+
+    /** Fixture Factory: creates a runtime with explicit structural and semantic validation ports. */
+    private EmbeddedAgentRuntime runtimeWithValidation(
+            StaticProviderRegistry providers,
+            com.unfurl.foundry.substrate.ports.OutputSchemaValidator schemaValidator,
+            com.unfurl.foundry.substrate.ports.SemanticValidatorRegistry semanticRegistry) {
+        return new EmbeddedAgentRuntime(
+                providers, new DefaultToolRegistry(), null,
+                new com.unfurl.foundry.substrate.guardrail.BudgetPolicyCostGuardrail(),
+                new AllowAllPermissionBridge(), null,
+                new com.unfurl.foundry.substrate.prompt.PromptAssembler(),
+                new com.unfurl.foundry.substrate.resolver.DataReferenceResolver(),
+                new com.unfurl.foundry.substrate.agent.AgentDefinitionValidator(), null, Map.of(),
+                ToolCallInterceptorChain.empty(), schemaValidator, semanticRegistry);
+    }
+
+    /** Fixture Factory: creates one phase with schema, semantic, mapping, and correction declarations. */
+    private AgentPhase validationPhase(CorrectionPolicy correctionPolicy) {
+        return new AgentPhase(
+                "validated", null, null, List.of(), null, Map.of("prompt", "produce amount"),
+                Map.of("amount", "$.output.amount"), List.of(), 0, List.of(),
+                "amount-schema", "positive-amount", correctionPolicy);
     }
 
     private ModelResponse response(String content, List<ModelToolCall> toolCalls) {

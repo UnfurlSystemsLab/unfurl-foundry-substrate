@@ -22,7 +22,10 @@ public record AgentPhase(
         Map<String, Object> outputMapping,
         List<String> dependencies,
         int maxToolIterations,
-        List<String> skillRefs
+        List<String> skillRefs,
+        String outputSchemaRef,
+        String semanticValidatorRef,
+        CorrectionPolicy correctionPolicy
 ) {
 /**
  * Constructs AgentPhase with the dependencies or value fields required by this component and preserves constructor validation invariants.
@@ -39,7 +42,24 @@ public record AgentPhase(
             int maxToolIterations
     ) {
         this(id, promptTemplateRef, modelRef, allowedToolRefs, ragQueryRef, input, outputMapping, dependencies,
-                maxToolIterations, List.of());
+                maxToolIterations, List.of(), null, null, CorrectionPolicy.none());
+    }
+
+    /** Compatibility constructor: preserves the pre-validation-slice skill-aware phase shape. */
+    public AgentPhase(
+            String id,
+            String promptTemplateRef,
+            String modelRef,
+            List<String> allowedToolRefs,
+            String ragQueryRef,
+            Map<String, Object> input,
+            Map<String, Object> outputMapping,
+            List<String> dependencies,
+            int maxToolIterations,
+            List<String> skillRefs
+    ) {
+        this(id, promptTemplateRef, modelRef, allowedToolRefs, ragQueryRef, input, outputMapping,
+                dependencies, maxToolIterations, skillRefs, null, null, CorrectionPolicy.none());
     }
 
 /**
@@ -51,6 +71,7 @@ public record AgentPhase(
         outputMapping = outputMapping == null ? Map.of() : Map.copyOf(outputMapping);
         dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
         skillRefs = skillRefs == null ? List.of() : List.copyOf(skillRefs);
+        correctionPolicy = correctionPolicy == null ? CorrectionPolicy.none() : correctionPolicy;
         if (maxToolIterations < 0) {
             throw new IllegalArgumentException("maxToolIterations must be >= 0");
         }
