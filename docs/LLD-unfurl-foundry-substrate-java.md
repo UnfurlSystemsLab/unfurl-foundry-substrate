@@ -333,8 +333,9 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 
 `AgentDelegationRequest` and `AgentDelegationResult`
 
-- The request contains pinned `agentRef`, objective, explicit context projection, source refs, expected output schema, budget envelope, permission scope, and metadata.
-- The result contains the child's terminal envelope or structured failure, effective child budget/permissions, cost accounting, provenance, and metadata. Successful empty output remains a successful terminal envelope; partial failure remains in `StructuredFailure.partialOutput`.
+- The request contains pinned `agentRef`, objective, explicit context projection, source refs, expected output schema, budget envelope, permission scope, additive `toolScope`, and metadata. The compatibility constructor defaults `toolScope` to the child's declared tools for one migration window.
+- The result contains the child's terminal envelope or structured failure, effective child budget/permissions/tools, cost accounting, provenance, and metadata. Successful empty output remains a successful terminal envelope; partial failure remains in `StructuredFailure.partialOutput`.
+- Effective tools are the stable intersection of the child's declared tools and the requested `toolScope`. Phase-level tool references are narrowed by the same set. A requested undeclared tool fails validation before child execution; a delegate never adds a tool or permission.
 
 Statuses:
 
@@ -444,9 +445,9 @@ durable Foundry host persists the approval request and re-enters with a one-time
 `OutputSchemaValidator` is the structural-validation port because schema resolution belongs to the host. The embedded runtime validates the raw structured output first, applies `outputMapping`, and only then resolves and invokes `semanticValidatorRef`. Missing declared schema or semantic bindings fail closed. Correction feedback is a provider-neutral JSON issue list appended as a user message; every retry re-enters the same structural, mapping, and semantic sequence. Both `maxAttempts` and `maxDurationMillis` are hard upper bounds.
 Each rejected output emits `OUTPUT_VALIDATION_FAILED`; each permitted repair turn emits `OUTPUT_CORRECTION_REQUESTED` before the model call. Event metadata contains issue codes and attempt counters, never the rejected business payload.
 
-`AgentDelegate` is the Strategy port for coordinator/subagent invocation. The embedded strategy is sequential. Foundry may provide a concurrent and durable implementation, but must enforce explicit context projection, pinned references, lower-of budgets, permission intersection, and structured child failure propagation.
+`AgentDelegate` is the Strategy port for coordinator/subagent invocation. The embedded strategy is sequential. Foundry may provide a concurrent and durable implementation, but must enforce explicit context projection, pinned references, lower-of budgets, permission and tool intersection, and structured child failure propagation.
 
-`SequentialAgentDelegate` resolves only pinned child references, constructs child input solely from objective, explicit context projection, declared sources, and expected schema, intersects requested permissions with the caller context, and composes every budget dimension using the lower non-null ceiling. It invokes children sequentially through `AgentRuntime`; it never copies a parent transcript or sibling result.
+`SequentialAgentDelegate` resolves only pinned child references, constructs child input solely from objective, explicit context projection, declared sources, and expected schema, intersects requested permissions with the caller context, narrows the resolved child definition to the effective tool scope, and composes every budget dimension using the lower non-null ceiling. It invokes children sequentially through `AgentRuntime`; it never copies a parent transcript or sibling result.
 
 `ContextResourceProvider` is the read-only resource boundary for files, documents, schemas, and MCP resources selected into context. A resource has stable identity, media type, content or content reference, provenance, and metadata. Resource discovery, transport, credentials, caching, and persistence remain adapter/product responsibilities.
 
