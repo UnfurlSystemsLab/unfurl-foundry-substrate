@@ -19,10 +19,24 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.DefaultToolCallingChatOptions;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.ToolDefinition;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Foundry {@link ModelProvider} backed by a host-supplied Spring AI
@@ -40,13 +54,27 @@ public final class SpringAiModelProvider implements ModelProvider {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<java.util.Map<String, Object>> ARGUMENTS_TYPE = new TypeReference<>() {
     };
+    private static final Set<String> SUPPORTED_PARAMETERS = Set.of(
+            "temperature", "topP", "topK", "maxTokens", "stopSequences");
+    private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(2);
+    private static final ExecutorService CALL_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
     private final ChatModel chatModel;
+    private final Duration timeout;
 
 /**
  * Constructs SpringAiModelProvider with the dependencies or value fields required by this component and preserves constructor validation invariants.
  */
     public SpringAiModelProvider(ChatModel chatModel) {
+        this(chatModel, DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * Adapter constructor: binds a host model and a finite maximum call timeout. A request may shorten,
+     * but never lengthen, this deployment-owned limit.
+     */
+    public SpringAiModelProvider(ChatModel chatModel, Duration timeout) {
         this.chatModel = Objects.requireNonNull(chatModel, "chatModel is required");
+        this.timeout = requirePositive(timeout);
     }
 
 /**
@@ -54,9 +82,22 @@ public final class SpringAiModelProvider implements ModelProvider {
  */
     @Override
     public ModelResponse complete(ModelRequest request, ExecutionContext context) {
+        Objects.requireNonNull(request, "request is required");
         Prompt prompt = toPrompt(request);
-        ChatResponse response = chatModel.call(prompt);
-        return fromResponse(response);
+        Duration callTimeout = requestTimeout(request);
+        Future<ChatResponse> call = CALL_EXECUTOR.submit(() -> chatModel.call(prompt));
+        try {
+            return fromResponse(call.get(callTimeout.toMillis(), TimeUnit.MILLISECONDS));
+        } catch (TimeoutException ex) {
+            call.cancel(true);
+            throw new IllegalStateException("Spring AI provider call timed out");
+        } catch (InterruptedException ex) {
+            call.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Spring AI provider call interrupted");
+        } catch (ExecutionException ex) {
+            throw new IllegalStateException("Spring AI provider call failed");
+        }
     }
 
 /**
@@ -76,11 +117,100 @@ public final class SpringAiModelProvider implements ModelProvider {
         if (!system.isEmpty()) {
             springMessages.add(0, new SystemMessage(system.toString()));
         }
-        // ChatOptions are typically supplied by the host's ChatModel
-        // bean (model name, temperature, etc.). We omit per-call options
-        // so the host's defaults govern, and the request's parameters
-        // map travels via metadata only.
-        return new Prompt(springMessages);
+        return new Prompt(springMessages, toOptions(request));
+    }
+
+    /**
+     * Adapter projection: maps the closed neutral parameter vocabulary and native tool definitions
+     * into per-call Spring AI options. Internal execution is disabled so policy remains in Foundry.
+     */
+    private ToolCallingChatOptions toOptions(ModelRequest request) {
+        Set<String> unknown = new LinkedHashSet<>(request.parameters().keySet());
+        unknown.removeAll(SUPPORTED_PARAMETERS);
+        if (!unknown.isEmpty()) {
+            throw new IllegalArgumentException("unsupported model parameters: " + unknown);
+        }
+        ToolCallingChatOptions.Builder builder = DefaultToolCallingChatOptions.builder()
+                .internalToolExecutionEnabled(false);
+        optionalNumber(request.parameters(), "temperature").ifPresent(value -> builder.temperature(value.doubleValue()));
+        optionalNumber(request.parameters(), "topP").ifPresent(value -> builder.topP(value.doubleValue()));
+        optionalNumber(request.parameters(), "topK").ifPresent(value -> builder.topK(positiveInt("topK", value)));
+        optionalNumber(request.parameters(), "maxTokens").ifPresent(value -> builder.maxTokens(positiveInt("maxTokens", value)));
+        Object stops = request.parameters().get("stopSequences");
+        if (stops != null) builder.stopSequences(stringList("stopSequences", stops));
+        if (!request.toolSchemas().isEmpty()) builder.toolCallbacks(request.toolSchemas().stream()
+                .map(this::toolCallback).toList());
+        return builder.build();
+    }
+
+    /** Adapter: creates a definition-only callback that cannot bypass the governed tool executor. */
+    private ToolCallback toolCallback(Map<String, Object> schema) {
+        String name = requiredText(schema, "name");
+        Object input = schema.getOrDefault("inputSchema", Map.of("type", "object"));
+        final ToolDefinition definition;
+        try {
+            definition = ToolDefinition.builder().name(name)
+                    .description(String.valueOf(schema.getOrDefault("description", "")))
+                    .inputSchema(MAPPER.writeValueAsString(input)).build();
+        } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+            throw new IllegalArgumentException("tool input schema is not JSON serializable", ex);
+        }
+        return new ToolCallback() {
+            @Override public ToolDefinition getToolDefinition() { return definition; }
+            @Override public String call(String arguments) {
+                throw new IllegalStateException("Spring AI internal tool execution is disabled");
+            }
+        };
+    }
+
+    /** Validation helper: returns a required non-blank schema field. */
+    private String requiredText(Map<String, Object> schema, String field) {
+        Object value = schema.get(field);
+        if (value == null || String.valueOf(value).isBlank()) {
+            throw new IllegalArgumentException("tool schema " + field + " is required");
+        }
+        return String.valueOf(value);
+    }
+
+    /** Validation helper: reads an optional numeric model parameter. */
+    private java.util.Optional<Number> optionalNumber(Map<String, Object> parameters, String name) {
+        Object value = parameters.get(name);
+        if (value == null) return java.util.Optional.empty();
+        if (!(value instanceof Number number)) throw new IllegalArgumentException(name + " must be numeric");
+        return java.util.Optional.of(number);
+    }
+
+    /** Validation helper: narrows a positive integral option without truncation or overflow. */
+    private int positiveInt(String name, Number number) {
+        long value = number.longValue();
+        if (value <= 0 || value > Integer.MAX_VALUE || number.doubleValue() != value) {
+            throw new IllegalArgumentException(name + " must be a positive integer");
+        }
+        return (int) value;
+    }
+
+    /** Validation helper: copies a non-empty list of strings. */
+    private List<String> stringList(String name, Object value) {
+        if (!(value instanceof List<?> values) || values.stream().anyMatch(item -> !(item instanceof String))) {
+            throw new IllegalArgumentException(name + " must be a list of strings");
+        }
+        return values.stream().map(String.class::cast).toList();
+    }
+
+    /** Timeout policy: lets request metadata shorten the deployment maximum only. */
+    private Duration requestTimeout(ModelRequest request) {
+        Object value = request.metadata().get("timeoutMs");
+        if (value == null) return timeout;
+        if (!(value instanceof Number number)) throw new IllegalArgumentException("timeoutMs must be numeric");
+        Duration requested = Duration.ofMillis(positiveInt("timeoutMs", number));
+        return requested.compareTo(timeout) < 0 ? requested : timeout;
+    }
+
+    /** Constructor guard: enforces a finite positive deployment timeout. */
+    private static Duration requirePositive(Duration value) {
+        Objects.requireNonNull(value, "timeout is required");
+        if (value.isZero() || value.isNegative()) throw new IllegalArgumentException("timeout must be positive");
+        return value;
     }
 
 /**

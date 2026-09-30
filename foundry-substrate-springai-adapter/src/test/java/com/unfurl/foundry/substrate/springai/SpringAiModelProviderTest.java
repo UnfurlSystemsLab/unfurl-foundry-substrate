@@ -15,12 +15,16 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 /**
  * Round-trip tests against an in-process {@link ChatModel} stub. We do
@@ -29,6 +33,71 @@ import static org.assertj.core.api.Assertions.assertThat;
  * primitives and back.
  */
 class SpringAiModelProviderTest {
+
+    /** Proves neutral options and schemas become definition-only native Spring AI call options. */
+    @Test
+    void projectsBoundedOptionsAndNativeToolDefinitions() {
+        AtomicReference<Prompt> captured = new AtomicReference<>();
+        ChatModel chatModel = prompt -> {
+            captured.set(prompt);
+            return new ChatResponse(List.of(new Generation(new AssistantMessage("ok"))));
+        };
+        ModelRequest request = new ModelRequest(List.of(Message.user("find it")), "logical-model",
+                Map.of("temperature", 0.2, "topP", 0.9, "topK", 20, "maxTokens", 512,
+                        "stopSequences", List.of("STOP")),
+                List.of(Map.of("name", "lookup", "description", "Looks up a record",
+                        "inputSchema", Map.of("type", "object", "required", List.of("id")))),
+                Map.of());
+
+        new SpringAiModelProvider(chatModel).complete(request, null);
+
+        ToolCallingChatOptions options = (ToolCallingChatOptions) captured.get().getOptions();
+        assertThat(options.getTemperature()).isEqualTo(0.2);
+        assertThat(options.getTopP()).isEqualTo(0.9);
+        assertThat(options.getTopK()).isEqualTo(20);
+        assertThat(options.getMaxTokens()).isEqualTo(512);
+        assertThat(options.getStopSequences()).containsExactly("STOP");
+        assertThat(options.getInternalToolExecutionEnabled()).isFalse();
+        assertThat(options.getToolCallbacks()).singleElement().satisfies(callback -> {
+            assertThat(callback.getToolDefinition().name()).isEqualTo("lookup");
+            assertThat(callback.getToolDefinition().inputSchema()).contains("required", "id");
+            assertThatIllegalStateException().isThrownBy(() -> callback.call("{\"id\":1}"))
+                    .withMessage("Spring AI internal tool execution is disabled");
+        });
+    }
+
+    /** Fail-closed projection: vendor-specific or typoed parameters cannot leak through the bridge. */
+    @Test
+    void rejectsUnknownModelParameters() {
+        ChatModel chatModel = prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage("ok"))));
+        ModelRequest request = new ModelRequest(List.of(Message.user("hi")), "model",
+                Map.of("vendorMagic", true), List.of(), Map.of());
+
+        assertThatIllegalArgumentException().isThrownBy(
+                () -> new SpringAiModelProvider(chatModel).complete(request, null))
+                .withMessageContaining("unsupported model parameters")
+                .withMessageContaining("vendorMagic");
+    }
+
+    /** Timeout boundary: a request can shorten the adapter limit and receives a sanitized failure. */
+    @Test
+    void cancelsCallsAtRequestTimeoutWithoutLeakingProviderDetails() {
+        ChatModel chatModel = prompt -> {
+            try {
+                Thread.sleep(Duration.ofSeconds(5));
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            return new ChatResponse(List.of(new Generation(new AssistantMessage("late"))));
+        };
+        ModelRequest request = new ModelRequest(List.of(Message.user("secret prompt")), "model",
+                Map.of(), List.of(), Map.of("timeoutMs", 25));
+
+        assertThatIllegalStateException().isThrownBy(
+                () -> new SpringAiModelProvider(chatModel, Duration.ofSeconds(1)).complete(request, null))
+                .withMessage("Spring AI provider call timed out")
+                .withMessageNotContaining("secret prompt");
+    }
 
     @Test
     void mapsFoundryMessagesIntoSpringPromptPreservingRoleAndOrder() {

@@ -291,6 +291,13 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 `ModelRequest` and `ModelResponse`
 
 - `ModelRequest` fields: `messages`, `modelRef`, `parameters` (temperature, maxTokens, …), `toolSchemas`, `metadata`.
+- The optional Spring AI adapter projects only the provider-neutral parameter allow-list
+  `temperature`, `topP`, `topK`, `maxTokens`, and `stopSequences`. Unknown parameters fail closed.
+  Neutral tool schemas are exposed as native Spring AI tool definitions with internal SDK tool
+  execution disabled; tool calls therefore return to the substrate runtime for policy-governed
+  execution. `metadata.timeoutMs` may shorten the adapter's finite default call timeout. Provider
+  exceptions and timeout failures are translated to sanitized boundary errors that never include
+  prompt, tool arguments, credentials, or provider response bodies.
 - `ModelResponse` fields: `message`, `toolCalls`, `outcome`, `usage` (prompt/completion tokens), `metadata`, `providerName`, `estimatedCostUsd`.
 - `ModelTurnOutcome`: `TOOL_REQUESTED`, `COMPLETED`, `MAX_OUTPUT_REACHED`, `CONTENT_FILTERED`, `PROVIDER_ERROR`. Provider adapters map Anthropic, OpenAI, Spring AI, and local-provider completion reasons into this closed neutral vocabulary. The legacy `finishReason` field is read only during a compatibility migration and must not drive new runtime branching.
 - `providerName` and `estimatedCostUsd` are typed fields. The legacy metadata keys `providerName`, `estimatedCostUsd`, and `costUsd` are accepted as a compatibility fallback, but providers should set the typed fields.
