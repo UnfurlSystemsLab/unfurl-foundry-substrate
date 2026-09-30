@@ -144,6 +144,10 @@ The contract returns a provider-neutral terminal envelope with a status such as 
 Agent execution must be explainable from explicit inputs rather than hidden transcript state:
 
 - `ContextPolicy` describes history selection, pinned facts, summary references, tool-result retention, provenance retention, and token allocation. The substrate owns the shape and selection port; Foundry owns summarization, persistence, and concrete stores.
+- `ModelRequestProjector` is the host-owned Strategy applied to every assembled model request before
+  the external-call boundary, including tool follow-ups and correction turns. It receives only the
+  actual definition, phase, resolved phase input, neutral request, and execution context. Embedded
+  hosts explicitly use identity projection; the Foundry product requires a profile-bound selector.
 - Output schemas guarantee shape. A `SemanticValidator` port checks domain meaning and may return specific correction feedback. Correction retries are bounded by policy; exhaustion produces escalation or a structured failure.
 - `ToolCallInterceptor` is a Chain of Responsibility around every tool call. Before-call interceptors may deny, require approval, or attach normalized arguments; after-call interceptors may normalize, redact, or annotate results. They cannot widen permissions or bypass a frozen DCP contract.
 - `AgentDelegate` invokes a pinned child `agentRef` with an explicit context projection, expected output schema, and stricter-or-equal tool/budget/permission envelope. Children do not inherit an implicit parent transcript or undeclared tools. Independent child calls may run concurrently only in a host runtime that provides that facility.

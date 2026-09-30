@@ -17,7 +17,6 @@ import com.unfurl.foundry.substrate.terminal.AgentTerminalEnvelope;
 import com.unfurl.foundry.substrate.terminal.AgentTerminalStatus;
 import com.unfurl.foundry.substrate.terminal.TerminalEnvelopeNormalizer;
 import com.unfurl.substrate.policy.ExecutionContext;
-import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.LinkedHashSet;
@@ -61,7 +60,7 @@ public final class SequentialAgentDelegate implements AgentDelegate {
                     "Pinned child agent was not found", Map.of(), BudgetPolicy.none(), List.of(), List.of(), request);
         }
 
-        BudgetPolicy effectiveBudget = lowerOf(request.budgetEnvelope(), child.budgetPolicy());
+        BudgetPolicy effectiveBudget = BudgetPolicy.lowerOf(request.budgetEnvelope(), child.budgetPolicy());
         List<String> effectivePermissions = caller.permissions().stream()
                 .filter(request.permissionScope()::contains).distinct().toList();
         List<String> declaredTools = declaredTools(child);
@@ -162,32 +161,6 @@ public final class SequentialAgentDelegate implements AgentDelegate {
                 partialOutput, Map.of(), Map.of("agentRef", request.agentRef()));
         return new AgentDelegationResult(null, failure, budget, permissions, tools,
                 CostAccounting.empty(Map.of("agentRef", request.agentRef())), failure.provenance(), request.metadata());
-    }
-
-    /** Policy composition: selects the lower non-null ceiling in every budget dimension. */
-    static BudgetPolicy lowerOf(BudgetPolicy outer, BudgetPolicy inner) {
-        BudgetPolicy left = outer == null ? BudgetPolicy.none() : outer;
-        BudgetPolicy right = inner == null ? BudgetPolicy.none() : inner;
-        Map<String, Object> metadata = new LinkedHashMap<>(right.metadata());
-        metadata.putAll(left.metadata());
-        return new BudgetPolicy(min(left.defaultBudgetUsd(), right.defaultBudgetUsd()),
-                min(left.maxBudgetUsd(), right.maxBudgetUsd()), min(left.maxPromptTokens(), right.maxPromptTokens()),
-                min(left.maxCompletionTokens(), right.maxCompletionTokens()),
-                min(left.maxTotalTokens(), right.maxTotalTokens()), metadata);
-    }
-
-    /** Numeric helper: treats null as an absent rather than zero ceiling. */
-    private static Long min(Long left, Long right) {
-        if (left == null) return right;
-        if (right == null) return left;
-        return Math.min(left, right);
-    }
-
-    /** Decimal helper: treats null as an absent rather than zero ceiling. */
-    private static BigDecimal min(BigDecimal left, BigDecimal right) {
-        if (left == null) return right;
-        if (right == null) return left;
-        return left.min(right);
     }
 
     /** Text helper: chooses a stable public fallback for absent runtime diagnostics. */

@@ -338,6 +338,25 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 - The result carries the compacted context map, selected read-only resources, retained provenance, estimated token count, unresolved waits, and metadata.
 - Pinned facts, unresolved questions/approvals, governance metadata, definition digest, and retained provenance are mandatory compaction invariants. If mandatory material exceeds the token allocation, selection fails closed rather than dropping it.
 
+`ModelRequestProjector`
+
+- `project(AgentDefinition, AgentPhase, Map<String,Object> invocationInput, Map<String,Object> resolvedInput, ModelRequest, ExecutionContext)`
+  returns the final neutral request before journaling/dispatch. It runs for initial, tool-follow-up,
+  and correction calls. The engine never sends the unprojected request to a provider or journal.
+- Foundry requires an exact `CONTEXT_SELECTOR` service binding and each agent's typed
+  `metadata.contextPolicy`. Explicit candidates are mapped into `phase.input.contextCandidates`:
+  history, pinnedFacts, summaries, toolResults, provenance (maps), resourceRefs (strings), and
+  unresolvedWaits (object list). No parent transcript or host metadata is searched implicitly.
+- Already-rendered prompt messages, active tool/correction transactions, objective, agentRef/digest,
+  resolved phase input outside that candidate envelope, trusted budgets/permissions, and tool schemas
+  are mandatory. Selected candidate material is added as a separate system context message; omitted
+  optional groups do not enter that message. Missing pinned-fact refs fail closed.
+- Allocation is a deterministic estimate of the final request projection, not an exact vendor
+  tokenizer or provider-window guarantee. Tool schemas and ordinary parameters cannot change through
+  selection; the reserved contextCandidates envelope is removed from provider parameters to prevent
+  optional material leaking through a side channel. Only the invocation objective/userMessage is
+  carried from original input, never undeclared history. Context persistence remains Slice 8A.2.
+
 `StructuredFailure`
 
 - Fields: `code`, `category`, `retryable`, optional `retryAfterMillis`, sanitized message, partial output, details, and provenance.
@@ -621,6 +640,11 @@ Cancellation:
 ---
 
 ## Composition Flow
+
+The domain `BudgetPolicy.lowerOf(outer, inner)` is the shared pure budget composition Strategy.
+It retains the lower non-null USD and token ceilings, clamps a default USD ceiling to a stricter
+maximum, and preserves policy annotations. The sequential child delegate and product workflow
+governance reuse this algebra; persistence, quota reservation, and billing remain product concerns.
 
 Composition is the runtime side of dynamic capability addition, viewed from this layer's responsibility.
 

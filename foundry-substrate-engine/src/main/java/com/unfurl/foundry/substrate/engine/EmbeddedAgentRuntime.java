@@ -91,6 +91,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     private final AgentDefinitionValidator validator;
     private final AgentRunStore store;
     private final ExternalCallBoundary externalCallBoundary;
+    private final com.unfurl.foundry.substrate.ports.ModelRequestProjector modelRequestProjector;
     private final Map<String, PromptTemplate> templates;
 
 /**
@@ -180,6 +181,21 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             OutputSchemaValidator outputSchemaValidator, SemanticValidatorRegistry semanticValidatorRegistry,
             ExternalCallBoundary externalCallBoundary
     ) {
+        this(providerRegistry, toolRegistry, ragRetriever, costGuardrail, permissionBridge, eventSink,
+                promptAssembler, resolver, validator, store, templates, toolCallInterceptors,
+                outputSchemaValidator, semanticValidatorRegistry, externalCallBoundary,
+                com.unfurl.foundry.substrate.ports.ModelRequestProjector.identity());
+    }
+
+    /** Ports and Adapters constructor: projects every request before the journal sees it; rejection prevents dispatch. */
+    public EmbeddedAgentRuntime(
+            ProviderRegistry providerRegistry, ToolRegistry toolRegistry, RagRetriever ragRetriever,
+            CostGuardrail costGuardrail, PermissionBridge permissionBridge, AgentEventSink eventSink,
+            PromptAssembler promptAssembler, DataReferenceResolver resolver, AgentDefinitionValidator validator,
+            AgentRunStore store, Map<String, PromptTemplate> templates, ToolCallInterceptorChain toolCallInterceptors,
+            OutputSchemaValidator outputSchemaValidator, SemanticValidatorRegistry semanticValidatorRegistry,
+            ExternalCallBoundary externalCallBoundary, com.unfurl.foundry.substrate.ports.ModelRequestProjector modelRequestProjector
+    ) {
         this.providerRegistry = providerRegistry;
         this.toolRegistry = toolRegistry;
         this.ragRetriever = ragRetriever;
@@ -195,6 +211,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         this.validator = validator;
         this.store = store == null ? defaultStore() : store;
         this.externalCallBoundary = Objects.requireNonNull(externalCallBoundary, "external call boundary is required");
+        this.modelRequestProjector = Objects.requireNonNull(modelRequestProjector, "model request projector is required");
         this.templates = Map.copyOf(templates);
     }
 
@@ -823,7 +840,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             Map<String, Object> resolvedInput,
         Instant started) {
         try {
-            ModelResponse response = callModel(state, phase, provider, messages, modelRef, context);
+            ModelResponse response = callModel(state, phase, provider, messages, modelRef, context, resolvedInput);
             return switch (response.outcome()) {
                 case COMPLETED, TOOL_REQUESTED -> ModelCallOutcome.success(response);
                 case MAX_OUTPUT_REACHED -> modelOutcomeFailure(
@@ -863,16 +880,17 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     }
 
 /**
- * Provider call strategy: sends the normalized model request through the neutral provider port and
- * records token/cost metadata only after the provider returns a usable response.
+     * Provider call Strategy: projects the normalized request before journaling or provider dispatch,
+     * including tool/correction turns, and records cost only after a usable response returns.
  */
     private ModelResponse callModel(State state, AgentPhase phase, ModelProvider provider, List<Message> messages,
-                                    String modelRef, ExecutionContext context) {
+                                    String modelRef, ExecutionContext context, Map<String, Object> resolvedInput) {
         List<Map<String, Object>> toolSchemas = toolSchemas(state.agent, phase, context);
         List<Message> requestMessages = toolSchemas.isEmpty()
                 ? List.copyOf(messages)
                 : messagesWithToolInstructions(messages, toolSchemas);
-        ModelRequest request = new ModelRequest(requestMessages, modelRef, phase.input(), toolSchemas, Map.of());
+        ModelRequest request = modelRequestProjector.project(state.agent, phase, state.agentInput, resolvedInput,
+                new ModelRequest(requestMessages, modelRef, phase.input(), toolSchemas, Map.of()), context);
         ModelResponse response = structuredToolCalls(externalCallBoundary.invoke(new ExternalCallBoundary.Call(
                 state.tenantId, state.runId, UUID.randomUUID().toString(),
                 ExternalCallBoundary.Kind.PROVIDER, modelRef, request),
