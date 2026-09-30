@@ -150,6 +150,11 @@ Agent execution must be explainable from explicit inputs rather than hidden tran
 
 The substrate supplies only neutral contracts and a sequential reference implementation. Durable checkpoints, concurrent delegation, approval queues, retry scheduling, and human-review work queues remain Foundry responsibilities.
 
+The harness state port supplies an atomic transition seam so a host can claim a wait before executing
+another turn, or cancel a current execution. Clarification, approval, and escalation are resumable
+states. Foundry owns durable signal identity, authorization grants, atomic token consumption, and
+cross-process coordination; the embedded default implements only process-local compare-and-set.
+
 ### MCP Adapter Boundary
 
 MCP is an integration protocol, not a substrate primitive. An MCP server is bound by a Foundry-owned adapter that projects MCP tools and resources into neutral `ToolDefinition`/`ToolExecutor` and context-resource ports. Process management, HTTP/stdio transport, credentials, discovery caching, and server lifecycle stay in Foundry or an adapter repository. The substrate never imports an MCP SDK or opens a transport. When an imported capability crosses components, its use remains governed by a DCP claim and frozen contract.

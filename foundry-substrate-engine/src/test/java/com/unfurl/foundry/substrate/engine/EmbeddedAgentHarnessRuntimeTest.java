@@ -109,6 +109,24 @@ class EmbeddedAgentHarnessRuntimeTest {
         assertThat(resumed.status()).isEqualTo(AgentHarnessStatus.COMPLETED);
     }
 
+    /** Verifies an escalation can be resumed by explicit operator input within the remaining turn bound. */
+    @Test
+    void resumesEscalationWithExplicitSignal() {
+        AgentDefinition agent = agent(Map.of());
+        ScriptedAgentRuntime agentRuntime = new ScriptedAgentRuntime(List.of(
+                completedRun("inner-1", agent, Map.of("kind", "escalated", "handoff", Map.of("reason", "review"))),
+                completedRun("inner-2", agent, Map.of("kind", "complete"))));
+        EmbeddedAgentHarnessRuntime harnessRuntime = new EmbeddedAgentHarnessRuntime(agentRuntime);
+        AgentHarnessRunState waiting = harnessRuntime.start(harness(agent, 3), Map.of(), ExecutionContext.empty());
+
+        AgentHarnessRunState resumed = harnessRuntime.resume(waiting.runId(),
+                Map.of("reviewed", true), ExecutionContext.empty());
+
+        assertThat(waiting.status()).isEqualTo(AgentHarnessStatus.ESCALATED);
+        assertThat(resumed.status()).isEqualTo(AgentHarnessStatus.COMPLETED);
+        assertThat(resumed.turn()).isEqualTo(2);
+    }
+
     /** A policy-level approval failure becomes a resumable harness wait with token projection. */
     @Test
     void convertsToolApprovalDecisionIntoHarnessWait() {

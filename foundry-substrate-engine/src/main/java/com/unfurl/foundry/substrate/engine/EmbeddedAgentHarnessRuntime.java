@@ -31,7 +31,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Ports & Adapters implementation: a sequential in-memory harness around an
+ * Ports & Adapters implementation: a sequential in-process harness around an
  * injected {@link AgentRuntime}. It gives embedded products a bounded agentic
  * loop without adding durability, scheduling, provider SDKs, or server APIs to
  * the substrate.
@@ -97,28 +97,38 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
     }
 
     /**
-     * Resumes a waiting in-memory harness by merging the external signal under
-     * the stable {@code signal} input key and running the remaining turn budget.
+     * Claims a clarification, approval, or escalation wait through the state Strategy before
+     * running the remaining turn budget. Bearer approval tokens are never forwarded to the agent.
      */
     @Override
     public AgentHarnessRunState resume(String runId, Map<String, Object> signal, ExecutionContext context) {
         AgentHarnessStateStore.AgentHarnessExecution execution = requireRun(runId, context);
         AgentHarnessRunState current = execution.state();
         if (current.status() != AgentHarnessStatus.WAITING_FOR_USER
-                && current.status() != AgentHarnessStatus.WAITING_FOR_APPROVAL) {
+                && current.status() != AgentHarnessStatus.WAITING_FOR_APPROVAL
+                && current.status() != AgentHarnessStatus.ESCALATED) {
             return current;
         }
+        if (signal == null || signal.isEmpty()) throw new IllegalArgumentException("harness resume signal is required");
         AgentHarnessDefinition harness = execution.definition();
         Map<String, Object> nextInput = new LinkedHashMap<>(current.latestInput());
-        nextInput.put("signal", signal == null ? Map.of() : Map.copyOf(signal));
+        Map<String, Object> forwardedSignal = new LinkedHashMap<>(signal);
+        forwardedSignal.remove("approvalToken");
+        nextInput.put("signal", Map.copyOf(forwardedSignal));
+        AgentHarnessRunState proposed = new AgentHarnessRunState(current.tenantId(), current.runId(),
+                current.harnessId(), current.harnessVersion(), AgentHarnessStatus.RUNNING, current.turn(),
+                current.originalInput(), nextInput, current.observations(), Map.of(), null, null,
+                current.createdAt(), Instant.now(), null);
+        AgentHarnessStateStore.AgentHarnessExecution claimed = stateStore.transition(execution,
+                new AgentHarnessStateStore.AgentHarnessExecution(harness, proposed), signal, context)
+                .orElseThrow(() -> new IllegalStateException("harness wait was already claimed or changed"));
         ExecutionContext resumeContext = approvalContext(context, signal);
-        return runLoop(harness, runId, current.createdAt(), current.originalInput(), Map.copyOf(nextInput),
+        return runLoop(harness, runId, current.createdAt(), current.originalInput(), claimed.state().latestInput(),
                 current.observations(), current.turn(), resumeContext);
     }
 
     /**
-     * Cancels a known in-memory harness run without trying to cancel already
-     * completed inner agent runs.
+     * Atomically cancels a known execution without recalling already dispatched inner agent runs.
      */
     @Override
     public AgentHarnessRunState cancel(String runId, ExecutionContext context) {
@@ -127,8 +137,11 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
         if (isTerminal(current.status())) {
             return current;
         }
-        return save(execution.definition(), withStatus(current, AgentHarnessStatus.CANCELLED,
-                current.output(), null, null), context);
+        AgentHarnessRunState cancelled = withStatus(current, AgentHarnessStatus.CANCELLED,
+                current.output(), null, null);
+        return stateStore.transition(execution, new AgentHarnessStateStore.AgentHarnessExecution(
+                execution.definition(), cancelled), Map.of("kind", "cancel"), context)
+                .orElseThrow(() -> new IllegalStateException("harness changed during cancellation")).state();
     }
 
     /**
@@ -433,7 +446,6 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      */
     private boolean isTerminal(AgentHarnessStatus status) {
         return status == AgentHarnessStatus.COMPLETED
-                || status == AgentHarnessStatus.ESCALATED
                 || status == AgentHarnessStatus.GAP
                 || status == AgentHarnessStatus.FAILED
                 || status == AgentHarnessStatus.CANCELLED;

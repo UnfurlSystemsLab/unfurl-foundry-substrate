@@ -26,7 +26,7 @@ mvn -pl unfurl-foundry-substrate -am test
 
 The canonical representation remains a versioned `AgentDefinition` phase graph. An Anthropic/Codex-style experience is provided by `AgentHarnessRuntime`, which wraps the graph with bounded model/tool/observation turns, clarification, escalation, cancellation, and resume. These are complementary layers, not competing formats.
 
-Flow invokes the complete construct through `uses: agent.run` plus a pinned `agentRef`. Flow owns its surrounding deterministic workflow; Foundry owns the internal agent graph, harness turns, tools, and child-agent calls. Work is delegated back to Flow through DCP `workflow.execute` only when it is a separately declared deterministic workflow requiring Flow-owned durability or coordination.
+Flow invokes the complete construct through `uses: agent.run` plus a pinned `agentRef`. Flow owns its surrounding deterministic workflow; Foundry owns the internal agent graph, harness turns, tools, and child-agent calls. Work is delegated back to Flow through DCP `workflow.execute` only when it is a separately declared deterministic workflow requiring Flow-owned durability or coordination. The neutral external-call boundary identifies provider, tool, child-agent, and workflow dispatches; Foundry binds its journal and recovery policy.
 
 The embedded harness uses an injected neutral `AgentHarnessStateStore` Strategy. Its default adapter
 is process-local; Foundry may bridge the seam to its versioned checkpoint repository. This is state

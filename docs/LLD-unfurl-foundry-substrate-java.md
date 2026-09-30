@@ -53,6 +53,8 @@ The design preserves the enterprise posture of the deterministic substrate:
 - The embedded runner exposes a neutral external-call boundary Strategy around admitted provider and
   tool dispatch. Its default in-process binding invokes directly; durable hosts inject a journaled
   binding. The substrate does not own persistence, idempotency, or replay decisions.
+  The neutral call-kind vocabulary also includes `CHILD_AGENT` and `WORKFLOW` for host-owned
+  composition dispatch; the substrate itself does not schedule those calls through this port.
 - Cost/guardrail and permission **port** shapes, without enforcing budgets or policies itself.
 - A `CostAccounting` shape and metering-grade event metadata (with attribution dimensions) sufficient for a reporting layer above to attribute and aggregate spend, without aggregating or persisting it here.
 
@@ -605,12 +607,16 @@ Start flow:
 
 Resume flow:
 
-- The embedded harness can resume only `WAITING_FOR_USER` runs it still has in memory. The signal is merged into the previous latest input under `signal` and used for the next bounded turn.
+- The embedded harness resumes `WAITING_FOR_USER`, `WAITING_FOR_APPROVAL`, and `ESCALATED` executions
+  restored by its state-store Strategy. It requires a non-empty signal and atomically claims RUNNING
+  through that port before the next bounded turn. The store may sanitize and validate host control
+  fields before returning the claimed execution. Durable identity and approval policy stay in Foundry.
 - Durable suspend/resume, persisted recovery, and external scheduler ownership remain in `unfurl-foundry`.
 
 Cancellation:
 
-- Mark the harness `CANCELLED` and return the latest in-memory snapshot. The embedded harness does not cancel already completed inner agent runs; durable cooperative cancellation belongs above the substrate.
+- Claim a `CANCELLED` snapshot through the same compare-and-set transition port. The embedded harness
+  does not recall already dispatched inner runs; host stores preserve cancellation against stale writes.
 
 ---
 

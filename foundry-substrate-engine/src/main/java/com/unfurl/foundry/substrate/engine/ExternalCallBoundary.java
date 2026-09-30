@@ -3,7 +3,7 @@ package com.unfurl.foundry.substrate.engine;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-/** Strategy port: lets a host govern one provider or tool invocation without owning its implementation. */
+/** Strategy port: lets a host govern one external invocation without owning its implementation. */
 public interface ExternalCallBoundary {
     /** Dispatch operation: invokes exactly once or fails before invocation; hosts may journal both transitions. */
     <T> T invoke(Call call, Supplier<T> invocation);
@@ -33,5 +33,5 @@ public interface ExternalCallBoundary {
     }
 
     /** Discriminator: identifies the neutral dispatch family for host-side governance. */
-    enum Kind { PROVIDER, TOOL }
+    enum Kind { PROVIDER, TOOL, CHILD_AGENT, WORKFLOW }
 }
