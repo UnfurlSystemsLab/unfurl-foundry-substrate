@@ -44,6 +44,40 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class EmbeddedAgentRuntimeTest {
 
+    /** Verifies the injected Strategy surrounds both physical provider and admitted tool dispatch. */
+    @Test
+    void routesProviderAndToolThroughExternalBoundary() {
+        StaticProviderRegistry providers = new StaticProviderRegistry().registerModel("model",
+                new ScriptedModelProvider(List.of(
+                        response("call tool", List.of(new ModelToolCall("call-1", "lookup", Map.of()))),
+                        response("done", List.of()))));
+        DefaultToolRegistry tools = new DefaultToolRegistry();
+        tools.register("lookup", new RecordingToolExecutor(Map.of("found", true)));
+        List<ExternalCallBoundary.Kind> dispatched = new java.util.ArrayList<>();
+        ExternalCallBoundary boundary = new ExternalCallBoundary() {
+            /** Recording Strategy: observes the physical call and invokes its supplier exactly once. */
+            @Override public <T> T invoke(Call call, java.util.function.Supplier<T> invocation) {
+                dispatched.add(call.kind());
+                return invocation.get();
+            }
+        };
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, tools, null,
+                new com.unfurl.foundry.substrate.guardrail.BudgetPolicyCostGuardrail(),
+                new AllowAllPermissionBridge(), null, new com.unfurl.foundry.substrate.prompt.PromptAssembler(),
+                new com.unfurl.foundry.substrate.resolver.DataReferenceResolver(),
+                new com.unfurl.foundry.substrate.agent.AgentDefinitionValidator(), null, Map.of(),
+                ToolCallInterceptorChain.empty(), null, null, boundary);
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(),
+                List.of(phase("first", Map.of("prompt", "lookup"), List.of("lookup"), 1)),
+                List.of(), Map.of(), "model", List.of("lookup"));
+
+        AgentRunState run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.COMPLETED);
+        assertThat(dispatched).containsExactly(ExternalCallBoundary.Kind.PROVIDER,
+                ExternalCallBoundary.Kind.TOOL, ExternalCallBoundary.Kind.PROVIDER);
+    }
+
     /** Structural rejection precedes semantic validation and precise feedback drives one repair. */
     @Test
     void validatesInOrderAndCorrectsWithinPolicy() {

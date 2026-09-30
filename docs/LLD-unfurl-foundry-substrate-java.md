@@ -50,6 +50,9 @@ The design preserves the enterprise posture of the deterministic substrate:
 - AI capability offer fragments and `ContractInvocable` implementations the `unfurl-dcp` broker can register into a host `CapabilityRegistry`.
 - A `correlationId` path through `ExecutionContext`, AI events, and contract invocation.
 - A minimal in-process embedded agent runner sufficient to execute a multi-phase agent against injected ports, leaving durability and concrete providers to foundry.
+- The embedded runner exposes a neutral external-call boundary Strategy around admitted provider and
+  tool dispatch. Its default in-process binding invokes directly; durable hosts inject a journaled
+  binding. The substrate does not own persistence, idempotency, or replay decisions.
 - Cost/guardrail and permission **port** shapes, without enforcing budgets or policies itself.
 - A `CostAccounting` shape and metering-grade event metadata (with attribution dimensions) sufficient for a reporting layer above to attribute and aggregate spend, without aggregating or persisting it here.
 
@@ -579,6 +582,11 @@ Constraints:
 - No concrete model/embedding/vector calls happen in the substrate; they go through ports whose concrete bindings are supplied by foundry/adapters.
 
 `EmbeddedAgentHarnessRuntime` is a sequential in-process control loop around `AgentRuntime`.
+
+Harness state access is delegated to the neutral `AgentHarnessStateStore` Strategy. The default
+constructor supplies an in-memory adapter and retains embedded behavior; durable hosts may inject an
+adapter that restores the immutable harness definition together with its latest run snapshot. The
+substrate defines no filesystem format, checkpoint schema, tenant repository, or migration policy.
 
 Start flow:
 

@@ -29,8 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 /**
  * Ports & Adapters implementation: a sequential in-memory harness around an
@@ -44,15 +42,15 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
     private final AgentRuntime agentRuntime;
     private final AgentHarnessDefinitionValidator validator;
     private final TerminalEnvelopeNormalizer terminalNormalizer;
-    private final ConcurrentMap<String, AgentHarnessRunState> runs = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, AgentHarnessDefinition> definitions = new ConcurrentHashMap<>();
+    private final AgentHarnessStateStore stateStore;
 
     /**
      * Constructs EmbeddedAgentHarnessRuntime around the supplied agent runtime
      * and the standard harness validator.
      */
     public EmbeddedAgentHarnessRuntime(AgentRuntime agentRuntime) {
-        this(agentRuntime, new AgentHarnessDefinitionValidator(), new TerminalEnvelopeNormalizer());
+        this(agentRuntime, new AgentHarnessDefinitionValidator(), new TerminalEnvelopeNormalizer(),
+                new InMemoryAgentHarnessStateStore());
     }
 
     /**
@@ -60,7 +58,7 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      * can reuse their already configured agent validation strategy.
      */
     public EmbeddedAgentHarnessRuntime(AgentRuntime agentRuntime, AgentHarnessDefinitionValidator validator) {
-        this(agentRuntime, validator, new TerminalEnvelopeNormalizer());
+        this(agentRuntime, validator, new TerminalEnvelopeNormalizer(), new InMemoryAgentHarnessStateStore());
     }
 
     /**
@@ -70,9 +68,19 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
             AgentRuntime agentRuntime,
             AgentHarnessDefinitionValidator validator,
             TerminalEnvelopeNormalizer terminalNormalizer) {
+        this(agentRuntime, validator, terminalNormalizer, new InMemoryAgentHarnessStateStore());
+    }
+
+    /** Constructor: injects the host-selected harness state Strategy for restart hydration. */
+    public EmbeddedAgentHarnessRuntime(
+            AgentRuntime agentRuntime,
+            AgentHarnessDefinitionValidator validator,
+            TerminalEnvelopeNormalizer terminalNormalizer,
+            AgentHarnessStateStore stateStore) {
         this.agentRuntime = Objects.requireNonNull(agentRuntime, "agentRuntime");
         this.validator = validator == null ? new AgentHarnessDefinitionValidator() : validator;
         this.terminalNormalizer = terminalNormalizer == null ? new TerminalEnvelopeNormalizer() : terminalNormalizer;
+        this.stateStore = Objects.requireNonNull(stateStore, "stateStore");
     }
 
     /**
@@ -85,7 +93,6 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
         String runId = UUID.randomUUID().toString();
         Instant createdAt = Instant.now();
         Map<String, Object> originalInput = input == null ? Map.of() : Map.copyOf(input);
-        definitions.put(runId, harness);
         return runLoop(harness, runId, createdAt, originalInput, originalInput, List.of(), 0, context);
     }
 
@@ -95,16 +102,13 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      */
     @Override
     public AgentHarnessRunState resume(String runId, Map<String, Object> signal, ExecutionContext context) {
-        AgentHarnessRunState current = requireRun(runId);
+        AgentHarnessStateStore.AgentHarnessExecution execution = requireRun(runId, context);
+        AgentHarnessRunState current = execution.state();
         if (current.status() != AgentHarnessStatus.WAITING_FOR_USER
                 && current.status() != AgentHarnessStatus.WAITING_FOR_APPROVAL) {
             return current;
         }
-        AgentHarnessDefinition harness = definitions.get(runId);
-        if (harness == null) {
-            return save(withStatus(current, AgentHarnessStatus.FAILED, current.output(),
-                    "HARNESS_DEFINITION_MISSING", "Harness definition was not retained for run: " + runId));
-        }
+        AgentHarnessDefinition harness = execution.definition();
         Map<String, Object> nextInput = new LinkedHashMap<>(current.latestInput());
         nextInput.put("signal", signal == null ? Map.of() : Map.copyOf(signal));
         ExecutionContext resumeContext = approvalContext(context, signal);
@@ -118,11 +122,13 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      */
     @Override
     public AgentHarnessRunState cancel(String runId, ExecutionContext context) {
-        AgentHarnessRunState current = requireRun(runId);
+        AgentHarnessStateStore.AgentHarnessExecution execution = requireRun(runId, context);
+        AgentHarnessRunState current = execution.state();
         if (isTerminal(current.status())) {
             return current;
         }
-        return save(withStatus(current, AgentHarnessStatus.CANCELLED, current.output(), null, null));
+        return save(execution.definition(), withStatus(current, AgentHarnessStatus.CANCELLED,
+                current.output(), null, null), context);
     }
 
     /**
@@ -142,15 +148,15 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
         AgentHarnessLoopPolicy policy = harness.loopPolicy();
         List<AgentHarnessObservation> observations = new ArrayList<>(existingObservations);
         Map<String, Object> currentInput = latestInput == null ? Map.of() : Map.copyOf(latestInput);
-        save(snapshot(context, harness, runId, AgentHarnessStatus.RUNNING, completedTurns, createdAt, originalInput,
-                currentInput, observations, Map.of(), null, null));
+        save(harness, snapshot(context, harness, runId, AgentHarnessStatus.RUNNING, completedTurns, createdAt,
+                originalInput, currentInput, observations, Map.of(), null, null), context);
 
         int turn = completedTurns;
         while (turn < policy.maxTurns()) {
             if (deadlineExceeded(createdAt, policy)) {
-                return save(snapshot(context, harness, runId, AgentHarnessStatus.FAILED, turn, createdAt, originalInput,
-                        currentInput, observations, Map.of(), "HARNESS_DEADLINE_EXCEEDED",
-                        "Harness deadline exceeded after " + policy.maxDurationMillis() + " ms"));
+                return save(harness, snapshot(context, harness, runId, AgentHarnessStatus.FAILED, turn, createdAt,
+                        originalInput, currentInput, observations, Map.of(), "HARNESS_DEADLINE_EXCEEDED",
+                        "Harness deadline exceeded after " + policy.maxDurationMillis() + " ms"), context);
             }
 
             turn++;
@@ -169,18 +175,19 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
                     || decision.status() == AgentHarnessStatus.GAP
                     || decision.status() == AgentHarnessStatus.FAILED
                     || decision.status() == AgentHarnessStatus.CANCELLED) {
-                return save(snapshot(context, harness, runId, decision.status(), turn, createdAt, originalInput,
-                        currentInput, observations, output, decision.errorCode(), decision.message()));
+                return save(harness, snapshot(context, harness, runId, decision.status(), turn, createdAt,
+                        originalInput, currentInput, observations, output, decision.errorCode(), decision.message()),
+                        context);
             }
 
             currentInput = decision.nextInput();
-            save(snapshot(context, harness, runId, AgentHarnessStatus.RUNNING, turn, createdAt, originalInput,
-                    currentInput, observations, output, null, null));
+            save(harness, snapshot(context, harness, runId, AgentHarnessStatus.RUNNING, turn, createdAt,
+                    originalInput, currentInput, observations, output, null, null), context);
         }
 
-        return save(snapshot(context, harness, runId, AgentHarnessStatus.FAILED, turn, createdAt, originalInput,
-                currentInput, observations, Map.of(), "HARNESS_MAX_TURNS_EXCEEDED",
-                "Harness exhausted maxTurns=" + policy.maxTurns()));
+        return save(harness, snapshot(context, harness, runId, AgentHarnessStatus.FAILED, turn, createdAt,
+                originalInput, currentInput, observations, Map.of(), "HARNESS_MAX_TURNS_EXCEEDED",
+                "Harness exhausted maxTurns=" + policy.maxTurns()), context);
     }
 
     /**
@@ -387,8 +394,9 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      * Store operation: records the latest in-memory harness run snapshot and
      * returns it to keep the loop code expression-oriented.
      */
-    private AgentHarnessRunState save(AgentHarnessRunState state) {
-        runs.put(state.runId(), state);
+    private AgentHarnessRunState save(
+            AgentHarnessDefinition definition, AgentHarnessRunState state, ExecutionContext context) {
+        stateStore.save(new AgentHarnessStateStore.AgentHarnessExecution(definition, state), context);
         return state;
     }
 
@@ -396,12 +404,10 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      * Store operation: loads a known harness run or reports a structured caller
      * error when resume/cancel targets an unknown run id.
      */
-    private AgentHarnessRunState requireRun(String runId) {
-        AgentHarnessRunState state = runs.get(runId);
-        if (state == null) {
-            throw new IllegalArgumentException("Harness run not found: " + runId);
-        }
-        return state;
+    private AgentHarnessStateStore.AgentHarnessExecution requireRun(
+            String runId, ExecutionContext context) {
+        return stateStore.load(runId, context)
+                .orElseThrow(() -> new IllegalArgumentException("Harness run not found: " + runId));
     }
 
     /**

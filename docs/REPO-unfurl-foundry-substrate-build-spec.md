@@ -28,6 +28,11 @@ The canonical representation remains a versioned `AgentDefinition` phase graph. 
 
 Flow invokes the complete construct through `uses: agent.run` plus a pinned `agentRef`. Flow owns its surrounding deterministic workflow; Foundry owns the internal agent graph, harness turns, tools, and child-agent calls. Work is delegated back to Flow through DCP `workflow.execute` only when it is a separately declared deterministic workflow requiring Flow-owned durability or coordination.
 
+The embedded harness uses an injected neutral `AgentHarnessStateStore` Strategy. Its default adapter
+is process-local; Foundry may bridge the seam to its versioned checkpoint repository. This is state
+access inversion only: durable persistence formats, recovery validation, and migration remain above
+the substrate.
+
 ## Planned Contract Slices
 
 The implementation-ready file/type/test backlog and migration order are maintained in

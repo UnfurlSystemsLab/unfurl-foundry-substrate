@@ -90,6 +90,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     private final DataReferenceResolver resolver;
     private final AgentDefinitionValidator validator;
     private final AgentRunStore store;
+    private final ExternalCallBoundary externalCallBoundary;
     private final Map<String, PromptTemplate> templates;
 
 /**
@@ -165,6 +166,20 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             OutputSchemaValidator outputSchemaValidator,
             SemanticValidatorRegistry semanticValidatorRegistry
     ) {
+        this(providerRegistry, toolRegistry, ragRetriever, costGuardrail, permissionBridge, eventSink,
+                promptAssembler, resolver, validator, store, templates, toolCallInterceptors,
+                outputSchemaValidator, semanticValidatorRegistry, ExternalCallBoundary.direct());
+    }
+
+    /** Ports and Adapters constructor: allows a durable host to govern each external dispatch. */
+    public EmbeddedAgentRuntime(
+            ProviderRegistry providerRegistry, ToolRegistry toolRegistry, RagRetriever ragRetriever,
+            CostGuardrail costGuardrail, PermissionBridge permissionBridge, AgentEventSink eventSink,
+            PromptAssembler promptAssembler, DataReferenceResolver resolver, AgentDefinitionValidator validator,
+            AgentRunStore store, Map<String, PromptTemplate> templates, ToolCallInterceptorChain toolCallInterceptors,
+            OutputSchemaValidator outputSchemaValidator, SemanticValidatorRegistry semanticValidatorRegistry,
+            ExternalCallBoundary externalCallBoundary
+    ) {
         this.providerRegistry = providerRegistry;
         this.toolRegistry = toolRegistry;
         this.ragRetriever = ragRetriever;
@@ -179,6 +194,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         this.resolver = resolver;
         this.validator = validator;
         this.store = store == null ? defaultStore() : store;
+        this.externalCallBoundary = Objects.requireNonNull(externalCallBoundary, "external call boundary is required");
         this.templates = Map.copyOf(templates);
     }
 
@@ -397,7 +413,10 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 Instant toolStart = Instant.now();
                 ToolCallRequest effectiveRequest = new ToolCallRequest(
                         call.id(), call.toolName(), effectiveArguments, interceptorDecision.metadata());
-                ToolCallResult toolResult = executor.execute(effectiveRequest, context);
+                ToolCallResult toolResult = externalCallBoundary.invoke(new ExternalCallBoundary.Call(
+                        state.tenantId, state.runId, UUID.randomUUID().toString(),
+                        ExternalCallBoundary.Kind.TOOL, call.toolName(), effectiveRequest),
+                        () -> executor.execute(effectiveRequest, context));
                 toolResult = toolCallInterceptors.after(effectiveRequest, toolResult, context);
                 toolCalls.add(new ToolCall(call.id(), call.toolName(), effectiveArguments,
                         toolResult.output(), toolResult.errorCode(), toolResult.errorMessage(), toolStart, Instant.now()));
@@ -854,7 +873,10 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 ? List.copyOf(messages)
                 : messagesWithToolInstructions(messages, toolSchemas);
         ModelRequest request = new ModelRequest(requestMessages, modelRef, phase.input(), toolSchemas, Map.of());
-        ModelResponse response = structuredToolCalls(provider.complete(request, context));
+        ModelResponse response = structuredToolCalls(externalCallBoundary.invoke(new ExternalCallBoundary.Call(
+                state.tenantId, state.runId, UUID.randomUUID().toString(),
+                ExternalCallBoundary.Kind.PROVIDER, modelRef, request),
+                () -> provider.complete(request, context)));
         emit(context, state, phase.id(), AgentEventType.MODEL_INVOKED, Map.of("modelRef", String.valueOf(modelRef)));
         long prompt = response.usage().promptTokens();
         long completion = response.usage().completionTokens();
