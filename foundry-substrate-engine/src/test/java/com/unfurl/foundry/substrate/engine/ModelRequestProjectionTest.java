@@ -76,8 +76,11 @@ class ModelRequestProjectionTest {
 
     /** Fixture Strategy: marks the final request so equality proves no unprojected request bypassed the boundary. */
     private ModelRequestProjector projection() {
-        return (agent, phase, invocation, input, request, context) -> new ModelRequest(request.messages(), request.modelRef(),
-                request.parameters(), request.toolSchemas(), Map.of("projected", true));
+        return (agent, phase, invocation, input, request, context) -> {
+            Map<String, Object> metadata = new LinkedHashMap<>(request.metadata());
+            metadata.put("projected", true);
+            return new ModelRequest(request.messages(), request.modelRef(), request.parameters(), request.toolSchemas(), metadata);
+        };
     }
 
     /** Fixture Factory: injects only neutral ports, capturing the exact request at the physical call boundary. */
@@ -86,7 +89,12 @@ class ModelRequestProjectionTest {
         ExternalCallBoundary boundary = new ExternalCallBoundary() {
             /** Recording Strategy: observes provider intents before invoking the supplied physical operation once. */
             @Override public <T> T invoke(Call call, Supplier<T> invocation) {
-                if (call.kind() == Kind.PROVIDER) journaled.add((ModelRequest) call.request());
+                if (call.kind() == Kind.PROVIDER) {
+                    ModelRequest request = (ModelRequest) call.request();
+                    assertThat(request.metadata()).containsEntry("agentRunId", call.runId()).containsEntry("modelCallId", call.callId());
+                    assertThat(request.metadata()).containsEntry("phaseId", "phase");
+                    journaled.add(request);
+                }
                 return invocation.get();
             }
         };

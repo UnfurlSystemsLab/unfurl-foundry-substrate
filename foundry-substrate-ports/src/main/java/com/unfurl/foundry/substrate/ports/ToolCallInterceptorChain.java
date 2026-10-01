@@ -26,7 +26,7 @@ public final class ToolCallInterceptorChain {
         return EMPTY;
     }
 
-    /** Runs before interceptors in order, threading normalized arguments and merged metadata. */
+    /** Chain of Responsibility: threads arguments/metadata in declared order while rejecting reserved scope changes. */
     public ToolCallDecision before(ToolCallRequest request, ExecutionContext context) {
         Map<String, Object> arguments = request.arguments();
         Map<String, Object> metadata = new LinkedHashMap<>(request.metadata());
@@ -35,6 +35,12 @@ public final class ToolCallInterceptorChain {
                     request.callId(), request.toolName(), arguments, Map.copyOf(metadata));
             ToolCallDecision decision = Objects.requireNonNull(interceptor.before(current, context),
                     "interceptor before decision");
+            // Once an engine scope exists, even an intermediate interceptor cannot relabel it.
+            if (request.metadata().containsKey("toolCallId")) {
+                Map<String, Object> candidate = new LinkedHashMap<>(metadata);
+                candidate.putAll(decision.metadata());
+                ToolCallScope.from(request.metadata()).verify(candidate);
+            }
             arguments = decision.arguments();
             metadata.putAll(decision.metadata());
             if (decision.type() != ToolCallDecisionType.ALLOW) {

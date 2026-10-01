@@ -356,6 +356,9 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
   selection; the reserved contextCandidates envelope is removed from provider parameters to prevent
   optional material leaking through a side channel. Only the invocation objective/userMessage is
   carried from original input, never undeclared history. Context persistence remains Slice 8A.2.
+- Every model request carries engine-owned `agentRunId`, `phaseId`, and `modelCallId` metadata; that
+  call ID is also used by the external-call boundary. Hosts may bind durable selected-context receipts
+  to this neutral scope before dispatch. Concrete context stores and receipt verification stay Foundry-owned.
 
 `StructuredFailure`
 
@@ -471,10 +474,25 @@ but cannot introduce a previously absent output field or turn a failed result in
 runtime maps denial and approval-required decisions to structured, pre-execution phase failures; a
 durable Foundry host persists the approval request and re-enters with a one-time approval token.
 
+The embedded engine now mints `ToolCallScope` (tenantId, agentRunId, phaseId, toolCallId) before every
+tool-policy evaluation. `toolCallId` is a UUID distinct from provider `ToolCallRequest.callId`.
+Scope metadata is threaded unchanged through the interceptor chain and validated before dispatch;
+the final request retains it and the external boundary uses that same toolCallId. Caller context
+metadata cannot supply these fields. A policy interceptor attempting to replace scope fails closed.
+Foundry owns receipts and durable approval continuation; state-only embedded resume remains unchanged.
+
 `SemanticValidator` is separate from JSON-schema validation. Schema validation establishes shape before or after projection; semantic validation checks claims such as totals, ranges, source grounding, and domain invariants. A phase may attach a bounded correction policy that feeds specific validation failures into another model turn. Exhaustion returns `VALIDATION_FAILED` or an escalation envelope, never an unbounded retry loop.
 
 `OutputSchemaValidator` is the structural-validation port because schema resolution belongs to the host. The embedded runtime validates the raw structured output first, applies `outputMapping`, and only then resolves and invokes `semanticValidatorRef`. Missing declared schema or semantic bindings fail closed. Correction feedback is a provider-neutral JSON issue list appended as a user message; every retry re-enters the same structural, mapping, and semantic sequence. Both `maxAttempts` and `maxDurationMillis` are hard upper bounds.
 Each rejected output emits `OUTPUT_VALIDATION_FAILED`; each permitted repair turn emits `OUTPUT_CORRECTION_REQUESTED` before the model call. Event metadata contains issue codes and attempt counters, never the rejected business payload.
+
+`CorrectionProgressObserver.save(progress, context)` is a host callback with a no-I/O embedded default.
+`CorrectionProgress` carries tenant (optional only embedded), run, phase, attempt, maximum attempts,
+duration, exhaustion action, original start, status, and issue codes. Its metadata uses explicit ISO
+start/deadline strings. The engine emits STARTED before validation, REPAIR_REQUESTED before projection,
+and COMPLETED/EXHAUSTED/FAILED before returning the phase outcome. Active repair metadata is attached
+to model requests. Progress writes propagate failures instead of fabricating completion; resume stays
+state-only. Foundry owns durable receipts, call linkage, and recovery checks.
 
 `AgentDelegate` is the Strategy port for coordinator/subagent invocation. The embedded strategy is sequential. Foundry may provide a concurrent and durable implementation, but must enforce explicit context projection, pinned references, lower-of budgets, permission and tool intersection, and structured child failure propagation.
 

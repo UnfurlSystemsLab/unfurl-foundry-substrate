@@ -73,6 +73,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * conditional inbound edges route phases to RUN or SKIPPED.
  */
 public final class EmbeddedAgentRuntime implements AgentRuntime {
+    private final com.unfurl.foundry.substrate.ports.CorrectionProgressObserver correctionObserver;
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
@@ -196,6 +197,23 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             OutputSchemaValidator outputSchemaValidator, SemanticValidatorRegistry semanticValidatorRegistry,
             ExternalCallBoundary externalCallBoundary, com.unfurl.foundry.substrate.ports.ModelRequestProjector modelRequestProjector
     ) {
+        this(providerRegistry, toolRegistry, ragRetriever, costGuardrail, permissionBridge, eventSink,
+                promptAssembler, resolver, validator, store, templates, toolCallInterceptors, outputSchemaValidator,
+                semanticValidatorRegistry, externalCallBoundary, modelRequestProjector,
+                com.unfurl.foundry.substrate.ports.CorrectionProgressObserver.noop());
+    }
+
+    /** Ports and Adapters constructor: requires the host's correction observer before any repair can dispatch. */
+    public EmbeddedAgentRuntime(
+            ProviderRegistry providerRegistry, ToolRegistry toolRegistry, RagRetriever ragRetriever,
+            CostGuardrail costGuardrail, PermissionBridge permissionBridge, AgentEventSink eventSink,
+            PromptAssembler promptAssembler, DataReferenceResolver resolver, AgentDefinitionValidator validator,
+            AgentRunStore store, Map<String, PromptTemplate> templates, ToolCallInterceptorChain toolCallInterceptors,
+            OutputSchemaValidator outputSchemaValidator, SemanticValidatorRegistry semanticValidatorRegistry,
+            ExternalCallBoundary externalCallBoundary, com.unfurl.foundry.substrate.ports.ModelRequestProjector modelRequestProjector,
+            com.unfurl.foundry.substrate.ports.CorrectionProgressObserver correctionObserver
+    ) {
+        this.correctionObserver = Objects.requireNonNull(correctionObserver, "correction observer is required");
         this.providerRegistry = providerRegistry;
         this.toolRegistry = toolRegistry;
         this.ragRetriever = ragRetriever;
@@ -357,7 +375,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     }
 
 /**
- * Performs the executePhase operation for this component, translating validated inputs into the domain result expected by callers.
+ * Template Method: resolves phase input, performs bounded model/tool turns under policy and permission
+ * ports, and returns a terminal phase snapshot. Each tool attempt gets engine-owned scope before
+ * interceptors; normalization cannot relabel it, and physical dispatch retains that exact identity.
  */
     private AgentPhaseState executePhase(State state, AgentPhase phase, ExecutionContext context) {
         Instant started = Instant.now();
@@ -401,9 +421,12 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                     return failedPhase(phase.id(), resolvedInput, messages, "TOOL_NOT_ALLOWED",
                             "Tool not allowed for phase: " + call.toolName(), started);
                 }
+                var toolScope = new com.unfurl.foundry.substrate.ports.ToolCallScope(
+                        state.tenantId, state.runId, phase.id(), UUID.randomUUID().toString());
                 ToolCallRequest originalRequest = new ToolCallRequest(
-                        call.id(), call.toolName(), call.arguments(), Map.of());
+                        call.id(), call.toolName(), call.arguments(), toolScope.metadata());
                 ToolCallDecision interceptorDecision = toolCallInterceptors.before(originalRequest, context);
+                toolScope.verify(interceptorDecision.metadata());
                 Map<String, Object> effectiveArguments = interceptorDecision.arguments();
                 if (interceptorDecision.type() != ToolCallDecisionType.ALLOW) {
                     ToolCallResult denied = ToolCallResult.failure(interceptorDecision.failure())
@@ -431,7 +454,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 ToolCallRequest effectiveRequest = new ToolCallRequest(
                         call.id(), call.toolName(), effectiveArguments, interceptorDecision.metadata());
                 ToolCallResult toolResult = externalCallBoundary.invoke(new ExternalCallBoundary.Call(
-                        state.tenantId, state.runId, UUID.randomUUID().toString(),
+                        state.tenantId, state.runId, toolScope.toolCallId(),
                         ExternalCallBoundary.Kind.TOOL, call.toolName(), effectiveRequest),
                         () -> executor.execute(effectiveRequest, context));
                 toolResult = toolCallInterceptors.after(effectiveRequest, toolResult, context);
@@ -507,9 +530,19 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         String content = initialContent;
         Instant correctionStarted = Instant.now();
         int attempts = 0;
+        correctionProgress(state, phase, attempts, correctionStarted,
+                com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.STARTED, List.of(), context);
         while (true) {
             OutputValidation validation = validateOutput(phase, content, toolCalls, context);
             if (validation.valid()) {
+                // A slow validator cannot make a repair accepted after the original deadline.
+                if (attempts > 0 && !Instant.now().isBefore(correctionStarted.plusMillis(phase.correctionPolicy().maxDurationMillis()))) {
+                    correctionProgress(state, phase, attempts, correctionStarted,
+                            com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.EXHAUSTED, List.of(), context);
+                    return exhaustedValidation(phase, resolvedInput, messages, toolCalls, validation, started);
+                }
+                correctionProgress(state, phase, attempts, correctionStarted,
+                        com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.COMPLETED, List.of(), context);
                 return completedPhase(phase, resolvedInput, messages, toolCalls, validation.output(), started);
             }
             emit(context, state, phase.id(), AgentEventType.OUTPUT_VALIDATION_FAILED, Map.of(
@@ -520,24 +553,34 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                     || java.time.Duration.between(correctionStarted, Instant.now()).toMillis()
                     < phase.correctionPolicy().maxDurationMillis();
             if (!withinAttempts || !withinDuration) {
+                correctionProgress(state, phase, attempts, correctionStarted,
+                        com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.EXHAUSTED, validation.issues(), context);
                 return exhaustedValidation(phase, resolvedInput, messages, toolCalls, validation, started);
             }
             attempts++;
+            correctionProgress(state, phase, attempts, correctionStarted,
+                    com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.REPAIR_REQUESTED, validation.issues(), context);
             emit(context, state, phase.id(), AgentEventType.OUTPUT_CORRECTION_REQUESTED,
                     Map.of("attempt", attempts));
             messages.add(Message.user(correctionFeedback(validation.issues(), attempts)));
             ModelCallOutcome corrected = callModelOutcome(
                     state, phase, provider, messages, modelRef, context, resolvedInput, started);
             if (!corrected.success()) {
+                correctionProgress(state, phase, attempts, correctionStarted,
+                        com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.FAILED, validation.issues(), context);
                 return corrected.failure();
             }
             ModelResponse response = corrected.response();
             if (java.time.Duration.between(correctionStarted, Instant.now()).toMillis()
                     >= phase.correctionPolicy().maxDurationMillis()) {
+                correctionProgress(state, phase, attempts, correctionStarted,
+                        com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.EXHAUSTED, validation.issues(), context);
                 return exhaustedValidation(
                         phase, resolvedInput, messages, toolCalls, validation, started);
             }
             if (response.hasToolCalls()) {
+                correctionProgress(state, phase, attempts, correctionStarted,
+                        com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.FAILED, validation.issues(), context);
                 return failedPhase(phase.id(), resolvedInput, messages,
                         "VALIDATION_CORRECTION_TOOL_REQUESTED",
                         "Correction turn requested tools instead of corrected structured output", started);
@@ -545,6 +588,17 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
             messages.add(response.message() == null ? Message.assistant("") : response.message());
             content = response.message() == null ? "" : response.message().content();
         }
+    }
+
+    /** Observer Adapter: records progress before exposing it to a model request; failures stop repair execution. */
+    private void correctionProgress(State state, AgentPhase phase, int attempt, Instant started,
+            com.unfurl.foundry.substrate.ports.CorrectionProgress.Status status, List<ValidationIssue> issues, ExecutionContext context) {
+        var policy = phase.correctionPolicy();
+        var progress = new com.unfurl.foundry.substrate.ports.CorrectionProgress(state.tenantId, state.runId, phase.id(),
+                attempt, policy.maxAttempts(), policy.maxDurationMillis(), policy.exhaustionAction().name(), started,
+                status, issues.stream().map(ValidationIssue::code).toList());
+        correctionObserver.save(progress, context);
+        state.corrections.put(phase.id(), progress);
     }
 
     /** Validation Pipeline step: structural schema, output mapping, then semantic validation. */
@@ -889,10 +943,17 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         List<Message> requestMessages = toolSchemas.isEmpty()
                 ? List.copyOf(messages)
                 : messagesWithToolInstructions(messages, toolSchemas);
+        String callId = UUID.randomUUID().toString();
+        Map<String, Object> callMetadata = new LinkedHashMap<>(Map.of("agentRunId", state.runId, "phaseId", phase.id(), "modelCallId", callId));
+        var correction = state.corrections.get(phase.id());
+        if (correction != null && correction.status() == com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.REPAIR_REQUESTED) {
+            callMetadata.put("correctionProgress", correction.metadata());
+        }
         ModelRequest request = modelRequestProjector.project(state.agent, phase, state.agentInput, resolvedInput,
-                new ModelRequest(requestMessages, modelRef, phase.input(), toolSchemas, Map.of()), context);
+                new ModelRequest(requestMessages, modelRef, phase.input(), toolSchemas,
+                        callMetadata), context);
         ModelResponse response = structuredToolCalls(externalCallBoundary.invoke(new ExternalCallBoundary.Call(
-                state.tenantId, state.runId, UUID.randomUUID().toString(),
+                state.tenantId, state.runId, callId,
                 ExternalCallBoundary.Kind.PROVIDER, modelRef, request),
                 () -> provider.complete(request, context)));
         emit(context, state, phase.id(), AgentEventType.MODEL_INVOKED, Map.of("modelRef", String.valueOf(modelRef)));
@@ -1475,6 +1536,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
  * Inputs and outputs remain defined by the declared fields and methods, with validation kept inside this type where present.
  */
     private static final class State {
+        private final Map<String, com.unfurl.foundry.substrate.ports.CorrectionProgress> corrections = new LinkedHashMap<>();
         final String tenantId;
         final String runId;
         final AgentDefinition agent;

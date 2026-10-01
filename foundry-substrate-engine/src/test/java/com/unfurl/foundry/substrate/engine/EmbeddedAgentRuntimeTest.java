@@ -58,6 +58,14 @@ class EmbeddedAgentRuntimeTest {
             /** Recording Strategy: observes the physical call and invokes its supplier exactly once. */
             @Override public <T> T invoke(Call call, java.util.function.Supplier<T> invocation) {
                 dispatched.add(call.kind());
+                if (call.kind() == Kind.TOOL) {
+                    var request = (com.unfurl.foundry.substrate.ports.ToolCallRequest) call.request();
+                    var scope = com.unfurl.foundry.substrate.ports.ToolCallScope.from(request.metadata());
+                    assertThat(scope.agentRunId()).isEqualTo(call.runId());
+                    assertThat(scope.toolCallId()).isEqualTo(call.callId()).isNotEqualTo(request.callId());
+                    assertThat(scope.phaseId()).isEqualTo("first");
+                    assertThat(scope.tenantId()).isNull();
+                }
                 return invocation.get();
             }
         };
@@ -606,6 +614,38 @@ class EmbeddedAgentRuntimeTest {
                 new com.unfurl.foundry.substrate.resolver.DataReferenceResolver(),
                 new com.unfurl.foundry.substrate.agent.AgentDefinitionValidator(), null, Map.of(),
                 ToolCallInterceptorChain.empty(), schemaValidator, semanticRegistry);
+    }
+
+    /** Verifies progress is saved before each repair and a failed observer prevents the next provider call. */
+    @Test void checkpointsCorrectionBeforeRepairDispatch() {
+        var calls = new AtomicInteger();
+        var providers = new StaticProviderRegistry().registerModel("model", (request, context) -> {
+            calls.incrementAndGet();
+            return response("not-json", List.of());
+        });
+        var progress = new java.util.ArrayList<com.unfurl.foundry.substrate.ports.CorrectionProgress>();
+        var runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry(), null,
+                new com.unfurl.foundry.substrate.guardrail.BudgetPolicyCostGuardrail(), new AllowAllPermissionBridge(), null,
+                new com.unfurl.foundry.substrate.prompt.PromptAssembler(), new com.unfurl.foundry.substrate.resolver.DataReferenceResolver(),
+                new com.unfurl.foundry.substrate.agent.AgentDefinitionValidator(), null, Map.of(), ToolCallInterceptorChain.empty(),
+                (schema, value, context) -> ValidationResult.invalid(List.of(new ValidationIssue("INVALID", "$", "invalid", Map.of()))),
+                (ref, context) -> Optional.empty(), ExternalCallBoundary.direct(),
+                com.unfurl.foundry.substrate.ports.ModelRequestProjector.identity(), (value, context) -> {
+                    progress.add(value);
+                    if (value.status() == com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.REPAIR_REQUESTED) {
+                        throw new IllegalStateException("progress store unavailable");
+                    }
+                });
+        var phase = validationPhase(new CorrectionPolicy(1, 60000, CorrectionExhaustionAction.FAIL, Map.of()));
+        var agent = new AgentDefinition("agent", "1", Map.of(), List.of(phase), List.of(), Map.of(), "model", List.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> runtime.start(agent, Map.of(), ExecutionContext.empty()))
+                .hasMessageContaining("progress store unavailable");
+        assertThat(calls).hasValue(1);
+        assertThat(progress.stream().map(com.unfurl.foundry.substrate.ports.CorrectionProgress::status).toList())
+                .containsExactly(com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.STARTED,
+                        com.unfurl.foundry.substrate.ports.CorrectionProgress.Status.REPAIR_REQUESTED);
+        assertThat(progress.getLast().startedAt()).isEqualTo(progress.getFirst().startedAt());
+        assertThat(progress.getLast().attempt()).isEqualTo(1);
     }
 
     /** Fixture Factory: creates one phase with schema, semantic, mapping, and correction declarations. */

@@ -154,6 +154,17 @@ Agent execution must be explainable from explicit inputs rather than hidden tran
 
 The substrate supplies only neutral contracts and a sequential reference implementation. Durable checkpoints, concurrent delegation, approval queues, retry scheduling, and human-review work queues remain Foundry responsibilities.
 
+`ToolCallScope` is neutral engine-owned tenant/run/phase/attempt identity carried in tool-request
+metadata. The provider's tool ID is correlation only. The engine mints an attempt before interceptors,
+retains that exact scope after normalization, and uses its attempt ID at the external-call boundary.
+Interceptors cannot replace reserved identity fields. Product decision receipts and approval stores
+remain outside the substrate.
+
+`CorrectionProgress` and `CorrectionProgressObserver` expose bounded validation/repair decisions
+without substrate persistence. One phase retains its original policy/start/deadline and monotonically
+increasing attempts; repair model requests carry that exact progress identity. Embedded hosts select
+an explicit no-I/O observer; Foundry persists it before dispatch and validates it during recovery.
+
 The harness state port supplies an atomic transition seam so a host can claim a wait before executing
 another turn, or cancel a current execution. Clarification, approval, and escalation are resumable
 states. Foundry owns durable signal identity, authorization grants, atomic token consumption, and
