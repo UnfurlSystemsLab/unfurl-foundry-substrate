@@ -201,6 +201,20 @@ tool allowlists, current permission and budget, and applies the configured after
 Remaining calls use ordinary before/after policy and external boundaries, and may suspend again.
 The host pins definition/ports and serializes continuation; no atomic/concurrent ownership is claimed
 by this SPI. Foundry does not bind it until 4c.3c.3 supplies durable dispatch/evidence transitions.
+The first product increment, 4c.3c.3a, separately CAS-claims dispatch ownership only after exact
+grant consumption acknowledgement and renewed host authorization. It retains neutral WAITING and
+creates no external intent or execution. A dispatch-claim receipt is not an invocation outcome,
+lease, takeover right or bearer capability; protected historical-wait transitions and product
+execution must be completed before this neutral SPI is bound.
+
+4c.3c.3b binds the neutral loop through a product-owned execution service and protected historical
+waits. Foundry retires/claims the wait atomically before effects, freezes narrowed authority and
+owns journal/result safety; a scoped store Adapter exposes the saved wait only to its exclusive
+initial loop load. Retired wait payloads remain protected, not provenance. Ordinary resume is a query.
+4c.3c.3c adds a neutral `AgentHarnessChildContinuation` projection SPI: after the host exclusively
+claims the harness and governs the same child's execution, replace that child's existing observation
+and reuse terminal interpretation/bounded scheduling. No new child/turn is created for a tool wait.
+Product stores, authorization, crash reconciliation and ownership remain outside the substrate.
 
 `CorrectionProgress` and `CorrectionProgressObserver` expose bounded validation/repair decisions
 without substrate persistence. One phase retains its original policy/start/deadline and monotonically

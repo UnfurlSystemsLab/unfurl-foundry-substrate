@@ -36,7 +36,7 @@ import java.util.UUID;
  * loop without adding durability, scheduling, provider SDKs, or server APIs to
  * the substrate.
  */
-public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
+public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime, com.unfurl.foundry.substrate.ports.AgentHarnessChildContinuation {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final AgentRuntime agentRuntime;
@@ -128,6 +128,32 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
         ExecutionContext resumeContext = approvalContext(context, signal);
         return runLoop(harness, runId, current.createdAt(), current.originalInput(), claimed.state().latestInput(),
                 current.observations(), current.turn(), resumeContext);
+    }
+
+    /** Same-child Projector: reuses normal terminal interpretation and remaining-turn scheduling after an explicit host-owned harness claim. */
+    @Override public AgentHarnessRunState continueChild(String runId, AgentRunState child, ExecutionContext context) {
+        var execution = requireRun(runId, context);
+        var current = execution.state();
+        if (child == null || current.status() != AgentHarnessStatus.RUNNING || current.observations().isEmpty()
+                || !Objects.equals(current.tenantId(), child.tenantId()) || child.status() == AgentRunStatus.RUNNING
+                || !execution.definition().agent().id().equals(child.agentId())
+                || !execution.definition().agent().version().equals(child.agentVersion()))
+            throw new IllegalArgumentException("harness child continuation requires claimed execution and a matching observable child");
+        var previous = current.observations().getLast();
+        if (previous.agentStatus() != AgentRunStatus.WAITING || !previous.agentRunId().equals(child.runId()))
+            throw new IllegalArgumentException("harness continuation cannot replace the original waiting child");
+        var output = terminalOutput(execution.definition().agent(), child);
+        var decision = decide(child, output);
+        var observations = new ArrayList<>(current.observations());
+        observations.set(observations.size() - 1, new AgentHarnessObservation(previous.turn(), child.runId(), child.status(), output,
+                decision.kind(), decision.message(), previous.startedAt(), Instant.now(),
+                envelopeFor(decision.status(), output, decision.errorCode(), decision.message())));
+        if (decision.status() == AgentHarnessStatus.RUNNING)
+            return runLoop(execution.definition(), runId, current.createdAt(), current.originalInput(), decision.nextInput(),
+                    observations, current.turn(), context);
+        return save(execution.definition(), snapshot(context, execution.definition(), runId, decision.status(), current.turn(),
+                current.createdAt(), current.originalInput(), current.latestInput(), observations, output,
+                decision.errorCode(), decision.message()), context);
     }
 
     /**

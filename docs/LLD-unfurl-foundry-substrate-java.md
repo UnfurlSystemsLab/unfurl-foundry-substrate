@@ -429,6 +429,24 @@ methods as fresh execution. Restore `completedToolIterations`, preserve original
 and do not append a duplicate saved assistant message. Later calls mint fresh scope and may create
 a new wait. Ordinary resume remains reload-only. Host uncertainty propagates without fake outcomes
 or further model/sibling execution; durable post-result/correction recovery is still product-owned.
+4c.3c.3a is a product-only dispatch-ownership CAS: require exact acknowledged consumption and
+current host authorization, preserve the active neutral wait, and record content-free owner/dispatch
+identity plus the effective lower-of authority digest. Inspection is read-only and DISPATCH_CLAIMED
+does not prove invocation. No neutral port, model/tool dispatch or ordinary resume behavior changes.
+Historical suspension/authority preservation and actual product execution remain subsequent increments.
+
+4c.3c.3b supplies the explicit product executor and frozen prompts/policy/context/validation bindings
+to the existing neutral continuation; a host-owned initial-load Adapter may expose the retained
+WAITING snapshot after its authoritative execution claim. Real subsequent saves are owner-checked
+CAS operations, not state-only observation writes. Product history retains original suspended state
+and authority and is bounded/integrity checked before dispatch. Exceptions never authorize replay.
+`AgentHarnessChildContinuation.continueChild(runId, childState, context)` is a projection SPI for
+4c.3c.3c. Require a host-claimed RUNNING harness with a last WAITING observation whose child/run/tenant
+exactly matches the supplied WAITING or terminal child snapshot. Replace, never append, that same
+turn's observation, retain original turn start/deadline/input, and reuse normal terminalOutput/decide
+logic. A genuine completed `continue` may enter the existing remaining-turn loop. The host authorizes
+and claims execution before invoking this SPI; the neutral projection itself supplies no grant,
+lease, dispatch or recovery ownership. Ordinary resume continues to forbid replacement inner turns.
 
 The public JSON/YAML codec binds Jackson's Java Time module explicitly, emits ISO timestamps and
 retains untyped decimal values as BigDecimal so suspended snapshots round-trip without precision loss.

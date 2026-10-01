@@ -28,6 +28,55 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class EmbeddedAgentHarnessRuntimeTest {
 
+    /** SPI contract: a host-claimed harness replaces its waiting observation without starting a replacement turn. */
+    @Test void projectsSameChildCompletionWithoutStartingAnotherAgent() {
+        var agent = agent(Map.of());
+        var runtime = new ScriptedAgentRuntime(List.of());
+        var store = new InMemoryAgentHarnessStateStore();
+        var harness = harness(agent, 3);
+        var child = completedRun("same-child", agent, Map.of("kind", "complete", "result", "done"));
+        var now = Instant.now();
+        var observation = new com.unfurl.foundry.substrate.runstate.AgentHarnessObservation(1, child.runId(), AgentRunStatus.WAITING,
+                Map.of(), "approval", null, now, now, null);
+        var claimed = new AgentHarnessRunState(null, "harness", harness.id(), harness.version(), AgentHarnessStatus.RUNNING,
+                1, Map.of("original", true), Map.of("original", true), List.of(observation), Map.of(), null, null, now, now, null);
+        store.save(new AgentHarnessStateStore.AgentHarnessExecution(harness, claimed), ExecutionContext.empty());
+        var engine = new EmbeddedAgentHarnessRuntime(runtime, new com.unfurl.foundry.substrate.agent.AgentHarnessDefinitionValidator(),
+                new com.unfurl.foundry.substrate.terminal.TerminalEnvelopeNormalizer(), store);
+        var result = engine.continueChild("harness", child, ExecutionContext.empty());
+        assertThat(result.status()).isEqualTo(AgentHarnessStatus.COMPLETED);
+        assertThat(result.turn()).isEqualTo(1);
+        assertThat(result.createdAt()).isEqualTo(now);
+        assertThat(result.observations()).hasSize(1);
+        assertThat(result.observations().getFirst().agentRunId()).isEqualTo("same-child");
+        assertThat(runtime.inputs()).isEmpty();
+    }
+
+    /** SPI contract: only a genuine completed continue schedules the next turn, preserving the original turn bound and input. */
+    @Test void sameChildContinueUsesRemainingHarnessTurns() {
+        var agent = agent(Map.of());
+        var runtime = new ScriptedAgentRuntime(List.of(completedRun("next-child", agent, Map.of("kind", "complete"))));
+        var store = new InMemoryAgentHarnessStateStore();
+        var harness = harness(agent, 2);
+        var now = Instant.now();
+        var observation = new com.unfurl.foundry.substrate.runstate.AgentHarnessObservation(1, "same-child", AgentRunStatus.WAITING,
+                Map.of(), "approval", null, now, now, null);
+        var claimed = new AgentHarnessRunState(null, "harness", harness.id(), harness.version(), AgentHarnessStatus.RUNNING,
+                1, Map.of("original", true), Map.of("original", true), List.of(observation), Map.of(), null, null, now, now, null);
+        store.save(new AgentHarnessStateStore.AgentHarnessExecution(harness, claimed), ExecutionContext.empty());
+        var engine = new EmbeddedAgentHarnessRuntime(runtime, new com.unfurl.foundry.substrate.agent.AgentHarnessDefinitionValidator(),
+                new com.unfurl.foundry.substrate.terminal.TerminalEnvelopeNormalizer(), store);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> engine.continueChild("harness",
+                completedRun("wrong-child", agent, Map.of("kind", "complete")), ExecutionContext.empty())).hasMessageContaining("replace");
+        var result = engine.continueChild("harness", completedRun("same-child", agent,
+                Map.of("kind", "continue", "nextInput", Map.of("step", 2))), ExecutionContext.empty());
+        assertThat(result.turn()).isEqualTo(2);
+        assertThat(result.createdAt()).isEqualTo(now);
+        assertThat(result.originalInput()).containsEntry("original", true);
+        assertThat(result.observations()).hasSize(2);
+        assertThat(runtime.inputs()).containsExactly(Map.of("step", 2));
+    }
+
     @Test
     void continuesWithNextInputUntilCompleted() {
         AgentDefinition agent = agent(Map.of());
