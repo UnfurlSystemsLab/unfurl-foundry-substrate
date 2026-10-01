@@ -98,7 +98,8 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
 
     /**
      * Claims a clarification, approval, or escalation wait through the state Strategy before
-     * running the remaining turn budget. Bearer approval tokens are never forwarded to the agent.
+     * running the remaining turn budget. Suspended inner tools cannot be replaced by another turn;
+     * their governed continuation is a product-owned boundary. Bearer approval tokens are never forwarded.
      */
     @Override
     public AgentHarnessRunState resume(String runId, Map<String, Object> signal, ExecutionContext context) {
@@ -109,6 +110,8 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
                 && current.status() != AgentHarnessStatus.ESCALATED) {
             return current;
         }
+        if (!current.observations().isEmpty() && current.observations().getLast().agentStatus() == AgentRunStatus.WAITING)
+            throw new IllegalStateException("suspended tool continuation is not implemented; replacement harness turns are forbidden");
         if (signal == null || signal.isEmpty()) throw new IllegalArgumentException("harness resume signal is required");
         AgentHarnessDefinition harness = execution.definition();
         Map<String, Object> nextInput = new LinkedHashMap<>(current.latestInput());
@@ -208,6 +211,8 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      * agent run using terminal phase/kind metadata when present.
      */
     private Map<String, Object> terminalOutput(AgentDefinition agent, AgentRunState run) {
+        if (run.status() == AgentRunStatus.WAITING) return run.phases().values().stream()
+                .filter(phase -> phase.status() == AgentPhaseStatus.WAITING).findFirst().orElseThrow().output();
         List<String> terminalPhaseIds = terminalPhaseIds(agent.metadata());
         List<String> terminalKinds = terminalKinds(agent.metadata());
         Map<String, Object> fallback = Map.of("content", "");
@@ -275,6 +280,8 @@ public final class EmbeddedAgentHarnessRuntime implements AgentHarnessRuntime {
      * Strategy: interprets a terminal agent output as the next harness decision.
      */
     private Decision decide(AgentRunState agentRun, Map<String, Object> output) {
+        if (agentRun.status() == AgentRunStatus.WAITING) return new Decision(
+                AgentHarnessStatus.WAITING_FOR_APPROVAL, "waiting_for_approval", Map.of(), null, "Tool call requires approval");
         if (agentRun.status() == AgentRunStatus.FAILED) {
             if ("TOOL_APPROVAL_REQUIRED".equals(agentRun.errorCode())) {
                 return new Decision(AgentHarnessStatus.WAITING_FOR_APPROVAL, "waiting_for_approval",

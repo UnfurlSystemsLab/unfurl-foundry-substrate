@@ -298,14 +298,13 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     }
 
 /**
- * Performs the resume operation for this component, translating validated inputs into the domain result expected by callers.
+ * State-only Query: returns the saved snapshot, including waits, without treating caller signals as tool authorization.
  */
     @Override
     public AgentRunState resume(String runId, Map<String, Object> signal, ExecutionContext context) {
         AgentRunState loaded = store.load(runId, context)
                 .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
-        // The in-memory runner has no suspend point in this slice, so resume reloads and
-        // returns. Durable suspend/resume is unfurl-foundry's responsibility.
+        // Captured waits are not dispatch authorization. The product owns governed continuation.
         return loaded;
     }
 
@@ -319,7 +318,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         Map<String, AgentPhaseState> phases = new LinkedHashMap<>(current.phases());
         phases.replaceAll((id, ps) -> isTerminal(ps.status()) ? ps
                 : new AgentPhaseState(id, AgentPhaseStatus.CANCELLED, ps.input(), ps.messages(), ps.toolCalls(),
-                ps.output(), ps.errorCode(), ps.errorMessage(), ps.startedAt(), Instant.now()));
+                ps.output(), ps.errorCode(), ps.errorMessage(), ps.startedAt(), Instant.now(), ps.suspension()));
         AgentRunState cancelled = withStatus(current, phases, AgentRunStatus.CANCELLED, null, null);
         store.save(cancelled, context);
         emitRun(context, cancelled, AgentEventType.AGENT_CANCELLED, Map.of());
@@ -327,7 +326,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
     }
 
 /**
- * Implements the runScheduler helper for this component, preserving the surrounding input, output, and edge-case contract.
+ * Scheduler Strategy: visits eligible phases in declaration order and stops the entire graph at the first failure or tool wait.
  */
     private AgentRunState runScheduler(State state, ExecutionContext context) {
         boolean progressed;
@@ -346,6 +345,14 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 }
                 AgentPhaseState result = executePhase(state, phase, context);
                 markPhase(state, phase.id(), result);
+                if (result.status() == AgentPhaseStatus.WAITING) {
+                    var waiting = save(state, AgentRunStatus.WAITING, context);
+                    var transaction = result.suspension();
+                    emit(context, state, phase.id(), AgentEventType.TOOL_APPROVAL_REQUIRED, Map.of(
+                            "tool", transaction.toolName(), "toolCallId", transaction.toolCallId(), "approvalId", transaction.approvalId()));
+                    emitRun(context, waiting, AgentEventType.AGENT_WAITING, Map.of("phaseId", phase.id()));
+                    return waiting;
+                }
                 if (result.status() == AgentPhaseStatus.FAILED) {
                     emit(context, state, phase.id(), AgentEventType.PHASE_FAILED,
                             Map.of("errorCode", result.errorCode(), "errorMessage", result.errorMessage()));
@@ -376,7 +383,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
 
 /**
  * Template Method: resolves phase input, performs bounded model/tool turns under policy and permission
- * ports, and returns a terminal phase snapshot. Each tool attempt gets engine-owned scope before
+ * ports, and returns a terminal or suspended phase snapshot. Each tool attempt gets engine-owned scope before
  * interceptors; normalization cannot relabel it, and physical dispatch retains that exact identity.
  */
     private AgentPhaseState executePhase(State state, AgentPhase phase, ExecutionContext context) {
@@ -416,7 +423,10 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
 
         int iterations = 0;
         while (response.hasToolCalls() && iterations < phase.maxToolIterations()) {
-            for (ModelToolCall call : response.toolCalls()) {
+            if (response.toolCalls().size() > 256) return failedPhase(phase.id(), resolvedInput, messages,
+                    "TOOL_BATCH_TOO_LARGE", "Model tool batch exceeds 256 calls", started);
+            for (int callIndex = 0; callIndex < response.toolCalls().size(); callIndex++) {
+                ModelToolCall call = response.toolCalls().get(callIndex);
                 if (!isToolAllowed(state.agent, phase, call.toolName())) {
                     return failedPhase(phase.id(), resolvedInput, messages, "TOOL_NOT_ALLOWED",
                             "Tool not allowed for phase: " + call.toolName(), started);
@@ -428,6 +438,20 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 ToolCallDecision interceptorDecision = toolCallInterceptors.before(originalRequest, context);
                 toolScope.verify(interceptorDecision.metadata());
                 Map<String, Object> effectiveArguments = interceptorDecision.arguments();
+                if (interceptorDecision.type() == ToolCallDecisionType.REQUIRE_APPROVAL) {
+                    Object approval = interceptorDecision.metadata().get("approvalId");
+                    if (!(approval instanceof String approvalId) || approvalId.isBlank())
+                        throw new IllegalArgumentException("approval-required tool decision must identify its approval");
+                    var suspension = new com.unfurl.foundry.substrate.runstate.ToolSuspension(
+                            state.tenantId, state.runId, phase.id(), toolScope.toolCallId(), approvalId,
+                            call.id(), call.toolName(), effectiveArguments, interceptorDecision.metadata(), modelRef,
+                            iterations, phase.maxToolIterations(), response.toolCalls().subList(callIndex, response.toolCalls().size()),
+                            response.message() == null ? "" : response.message().content(), Instant.now());
+                    return new AgentPhaseState(phase.id(), AgentPhaseStatus.WAITING, resolvedInput, messages,
+                            toolCalls, Map.of("kind", "waiting_for_approval", "approvalId", approvalId,
+                            "agentRunId", state.runId, "phaseId", phase.id(), "toolCallId", toolScope.toolCallId()),
+                            null, null, started, null, suspension);
+                }
                 if (interceptorDecision.type() != ToolCallDecisionType.ALLOW) {
                     ToolCallResult denied = ToolCallResult.failure(interceptorDecision.failure())
                             .withMetadata(interceptorDecision.metadata());

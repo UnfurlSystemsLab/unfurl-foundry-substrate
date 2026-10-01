@@ -373,10 +373,29 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 
 Statuses:
 
-- `AgentRunStatus`: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`.
-- `AgentPhaseStatus`: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `SKIPPED`, `CANCELLED`.
+- `AgentRunStatus`: `PENDING`, `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `CANCELLED`.
+- `AgentPhaseStatus`: `PENDING`, `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `SKIPPED`, `CANCELLED`.
 
-The in-memory runner does not produce a waiting state in v1. Approval-driven waits and durable suspend/resume belong to `unfurl-foundry`; if that floor moves down into the substrate later, the statuses and resume contract must be extended together.
+`AgentRunStatus` and `AgentPhaseStatus` additionally support `WAITING` for an actual suspended tool
+transaction (8A.2b.4b). A waiting run has exactly one waiting phase; that phase has a `ToolSuspension`
+with matching tenant/run/phase scope, approval ID, engine attempt, provider correlation ID, tool,
+normalized arguments/metadata, modelRef, completed/max tool iterations, remaining ordered calls,
+response content and suspendedAt. The first remaining call must match the pending provider/tool
+identity; normalized arguments can differ from the raw model arguments. Batch size is capped at 256.
+Execution payload JSON is deeply copied, admits nulls and finite numbers only, and is bounded to
+64 nesting levels and 100000 values per frozen object. Existing ten-argument phase constructors
+remain available for nonsuspended snapshots. Cancellation retains suspension evidence but is terminal.
+The engine returns before executing the pending call, later batch calls, sibling phases or another
+model. No failed `ToolCall` is fabricated for a pending attempt. Resume returns the saved snapshot
+without selecting context, resolving definitions or dispatching. Harness and delegation/DCP adapters
+project WAITING_FOR_APPROVAL; harness resume of a suspended child explicitly refuses a replacement
+turn until governed tool continuation is implemented. Persistence and authorized execution stay Foundry-owned.
+
+The public JSON/YAML codec binds Jackson's Java Time module explicitly, emits ISO timestamps and
+retains untyped decimal values as BigDecimal so suspended snapshots round-trip without precision loss.
+Foundry's file-backed agent envelope reader applies the same decimal preservation.
+After the waiting checkpoint commits, emit TOOL_APPROVAL_REQUIRED then AGENT_WAITING with only
+phase/tool/attempt/approval identifiers; never emit TOOL_FAILED or PHASE_COMPLETED for this wait.
 
 ### Ports
 
@@ -471,8 +490,8 @@ Composite/Chain implementation used by the embedded runtime. It threads normaliz
 before interceptors, stops at the first non-allow decision, and applies after interceptors in reverse.
 After interceptors may change existing output values or remove fields, and may append result metadata,
 but cannot introduce a previously absent output field or turn a failed result into success. The embedded
-runtime maps denial and approval-required decisions to structured, pre-execution phase failures; a
-durable Foundry host persists the approval request and re-enters with a one-time approval token.
+runtime maps denial to a structured pre-execution failure, but approval-required decisions to the
+typed waiting transaction above. A one-time approval token alone does not resume or regenerate an attempt.
 
 The embedded engine now mints `ToolCallScope` (tenantId, agentRunId, phaseId, toolCallId) before every
 tool-policy evaluation. `toolCallId` is a UUID distinct from provider `ToolCallRequest.callId`.
@@ -503,6 +522,11 @@ state-only. Foundry owns durable receipts, call linkage, and recovery checks.
 `CostGuardrail` evaluates the current `CostAccounting` against the resolved `AgentDefinition.budgetPolicy` and any outer execution envelope supplied by the caller. For flow-hosted `agentRef` invocations, flow passes the remaining workflow-run budget in `ExecutionContext.metadata()["outerBudgetRemainingUsd"]`; foundry/foundry-substrate guardrails apply the stricter of the agent cap and that outer value. The substrate shape remains a decision port only: it does not persist quota state or aggregate spend.
 
 `BudgetPolicyCostGuardrail` is the concrete no-I/O default shipped in `foundry-substrate-ports`. It reads two metadata keys through `CostGuardrailContext`: `agentBudgetPolicy` (attached by `EmbeddedAgentRuntime` from `AgentDefinition.budgetPolicy`) and `outerBudgetRemainingUsd` (optionally supplied by a host such as flow). It enforces only the current in-memory accounting snapshot; persistent quota state and rate tables stay above the substrate.
+
+`CostGuardrailContext.withAgentBudgetPolicy` uses BudgetPolicy.lowerOf for an inherited typed
+agentBudgetPolicy and the agent-declared policy; a present non-BudgetPolicy value is rejected.
+All spend/token ceilings survive this projection, including explicit zero. No I/O or durable
+approval authority is introduced into the substrate by this helper.
 
 ### Offers And Composition
 
@@ -601,8 +625,10 @@ Start flow:
 
 Resume flow:
 
-- In v1 the in-memory runner has no suspend point and never produces `WAITING`; `resume(runId, signal, context)` reloads the current run state and returns it.
-- Durable, distributed, approval-driven, and streaming resume behavior belongs to `unfurl-foundry`. The LLD-level resume flow is therefore aspirational until a real wait-producing substrate path is introduced.
+- The in-memory runner captures approval suspend points; `resume(runId, signal, context)` reloads
+  the current run state and returns it without executing a suspended transaction (8A.2b.4b).
+- Authorized durable/distributed tool dispatch and streaming resume belong to `unfurl-foundry`.
+  Capturing a real wait does not implement executing it; the embedded resume operation remains state-only.
 
 Cancellation:
 
@@ -801,7 +827,9 @@ Enterprise tests:
 6. Implement RAG query/result/provenance shapes and the retriever port surface.
 7. Implement `agentRef`/`toolRef` resolution with unit/property tests.
 8. Implement offer fragments and `ContractInvocable` impls (`AgentInvocation`, `ToolInvocation`, `RagInvocation`) against `unfurl-dcp` claim/contract types.
-9. Implement the in-memory `AgentRunStore` and `EmbeddedAgentRuntime`, with the resolver wired into phase-input and condition paths. `resume()` remains a reload-only v1 stub until a wait-producing substrate path exists.
+9. Implement the in-memory `AgentRunStore` and `EmbeddedAgentRuntime`, with the resolver wired into
+   phase-input/condition paths and approval-wait capture. `resume()` is a state-only query; authorized
+   execution from a persisted transaction is a Foundry-owned continuation boundary.
 10. Implement AI event schema and metadata-safe event builders.
 11. Implement downstream testing fixtures (echo provider, static embedder, in-memory vector store, recording tool executor).
 12. Complete coverage, architecture, and enterprise guardrail tests before flow and foundry consume the library.

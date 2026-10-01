@@ -24,6 +24,59 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FoundrySubstrateCodecTest {
     private final FoundrySubstrateCodec codec = new FoundrySubstrateCodec();
 
+    /** Memento codec contract: waiting execution survives JSON/YAML with original identity, ISO time and precise decimal arguments. */
+    @Test void roundTripsSuspendedToolExecutionAndFreezesNestedData() {
+        var nested = new java.util.ArrayList<Object>();
+        nested.add(null); nested.add(new java.math.BigDecimal("12.345678901234567890123456789"));
+        var arguments = Map.<String, Object>of("nested", nested);
+        var scope = Map.<String, Object>of("tenantId", "tenant", "agentRunId", "run", "phaseId", "phase",
+                "toolCallId", "attempt", "approvalId", "approval");
+        var now = java.time.Instant.parse("2026-01-01T00:00:00.123456789Z");
+        var suspension = new com.unfurl.foundry.substrate.runstate.ToolSuspension("tenant", "run", "phase", "attempt",
+                "approval", "provider", "write", arguments, scope, "model", 1, 3,
+                List.of(new com.unfurl.foundry.substrate.model.ModelToolCall("provider", "write", arguments)), "batch", now);
+        var phase = new com.unfurl.foundry.substrate.runstate.AgentPhaseState("phase",
+                com.unfurl.foundry.substrate.runstate.AgentPhaseStatus.WAITING, Map.of("input", "value"),
+                List.of(Message.assistant("batch")), List.of(), Map.of("approvalId", "approval"), null, null,
+                now.minusSeconds(1), null, suspension);
+        var run = new com.unfurl.foundry.substrate.runstate.AgentRunState("tenant", "run", "agent", "1",
+                com.unfurl.foundry.substrate.runstate.AgentRunStatus.WAITING, Map.of(), Map.of("phase", phase), null,
+                null, null, now.minusSeconds(1), now);
+        nested.clear();
+        var json = codec.toJson(run);
+        assertThat(json).contains(now.toString());
+        assertThat(codec.fromJson(json, run.getClass())).isEqualTo(run);
+        assertThat(codec.fromYaml(codec.toYaml(run), run.getClass())).isEqualTo(run);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ((List<?>) suspension.arguments().get("nested")).clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    /** Snapshot safety contract: opaque/non-finite/cyclic values and oversized batches are rejected before persistence. */
+    @Test void refusesUnsafeSuspendedPayloadsAndBounds() {
+        for (Object invalid : List.of(Double.NaN, Double.POSITIVE_INFINITY, new Object())) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                    com.unfurl.foundry.substrate.runstate.ExecutionJsonSnapshot.freeze(Map.of("value", invalid)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        var cycle = new java.util.HashMap<String, Object>(); cycle.put("self", cycle);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                com.unfurl.foundry.substrate.runstate.ExecutionJsonSnapshot.freeze(cycle))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("bounds");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                com.unfurl.foundry.substrate.runstate.ExecutionJsonSnapshot.freeze(Map.of("values", java.util.Collections.nCopies(100001, 1))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("bounds");
+        var scope = Map.<String, Object>of("agentRunId", "run", "phaseId", "phase", "toolCallId", "attempt", "approvalId", "approval");
+        var call = new com.unfurl.foundry.substrate.model.ModelToolCall("provider", "write", Map.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new com.unfurl.foundry.substrate.runstate.ToolSuspension(
+                null, "run", "phase", "attempt", "approval", "provider", "write", Map.of(), scope, "model", 0, 1,
+                java.util.Collections.nCopies(257, call), "batch", java.time.Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("256");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new com.unfurl.foundry.substrate.runstate.ToolSuspension(
+                null, "run", "phase", "attempt", "approval", "provider", "write", Map.of(), scope, "model", 1, 1,
+                List.of(call), "batch", java.time.Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("bounds");
+    }
+
     @Test
     void roundTripsAgentDefinitionThroughYaml() {
         String yaml = """
@@ -145,7 +198,7 @@ class FoundrySubstrateCodecTest {
                 Map.of("proposalId", "p-1"),
                 List.of("Approve deployment?"),
                 Map.of("queue", "operators"),
-                Map.of("score", 0.91),
+                Map.of("score", new java.math.BigDecimal("0.91")),
                 Map.of("agentRef", "deploy@1.0.0"),
                 null,
                 Map.of("totalTokens", 42),

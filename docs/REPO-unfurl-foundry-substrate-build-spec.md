@@ -35,6 +35,12 @@ the substrate.
 
 ## Planned Contract Slices
 
+Slice 8A.2b.4b extends domain runstate with a deeply immutable bounded `ToolSuspension` and
+WAITING statuses. The embedded engine captures a real pending transaction through its existing
+state-store port, without persistence or authorization code. Harness/delegate adapters retain wait
+semantics and do not treat a suspended child as permission to start another turn. Atomic claims,
+durable receipt validation, approvals and external-result reconciliation remain product concerns.
+
 The implementation-ready file/type/test backlog and migration order are maintained in
 [`IMPLEMENTATION-agent-harness-contract-backlog.md`](IMPLEMENTATION-agent-harness-contract-backlog.md).
 
@@ -49,6 +55,10 @@ The implementation-ready file/type/test backlog and migration order are maintain
 Each slice must update public-record codec tests, architecture tests, event/error behavior, and Foundry consumer compatibility. No slice may introduce an SDK, transport, persistent store, MCP client, approval queue, or concurrent scheduler into this repository.
 
 ## GitHub Packages
+
+Budget context projection must compose inherited and declared policies via `BudgetPolicy.lowerOf`,
+not overwrite the caller's spend/token ceilings. Reject present malformed inherited policies before
+dispatch. Foundry owns persisted caller authority and continuation authorization through product ports.
 
 This repository participates in the `UnfurlSystemsLab` private Maven package chain.
 

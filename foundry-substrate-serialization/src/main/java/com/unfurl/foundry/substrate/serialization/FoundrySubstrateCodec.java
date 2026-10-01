@@ -74,10 +74,13 @@ public final class FoundrySubstrateCodec {
     }
 
 /**
- * Implements the mapper helper for this component, preserving the surrounding input, output, and edge-case contract.
+ * Codec Factory: retains exact decimal payloads and ISO instants in public execution snapshots.
  */
     private static ObjectMapper mapper(ObjectMapper mapper) {
         return mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                 .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
                 .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
     }

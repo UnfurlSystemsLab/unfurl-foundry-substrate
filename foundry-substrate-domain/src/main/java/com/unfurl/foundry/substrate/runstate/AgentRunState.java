@@ -4,8 +4,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * record for the Foundry AI substrate surface; documents the AgentRunState contract used by DCP ports, adapters, or domain code.
- * Inputs and outputs remain defined by the declared fields and methods, with validation kept inside this type where present.
+ * Memento: holds one agent's graph execution, accounting and original input under its exact run identity.
  */
 public record AgentRunState(
         String tenantId,
@@ -22,10 +21,27 @@ public record AgentRunState(
         Instant updatedAt
 ) {
 /**
- * Constructs AgentRunState with the dependencies or value fields required by this component and preserves constructor validation invariants.
+ * Snapshot constructor: requires exactly one live phase for WAITING and freezes all continuation data at suspension.
  */
     public AgentRunState {
         agentInput = agentInput == null ? Map.of() : Map.copyOf(agentInput);
         phases = phases == null ? Map.of() : Map.copyOf(phases);
+        long waiting = phases.values().stream().filter(phase -> phase.status() == AgentPhaseStatus.WAITING).count();
+        if ((status == AgentRunStatus.WAITING && waiting != 1) || (status != AgentRunStatus.WAITING && waiting != 0))
+            throw new IllegalArgumentException("waiting agent requires exactly one waiting phase");
+        if (status == AgentRunStatus.WAITING) {
+            agentInput = ExecutionJsonSnapshot.freeze(agentInput);
+            Map<String, AgentPhaseState> frozen = new java.util.LinkedHashMap<>();
+            phases.forEach((id, phase) -> frozen.put(id, phase.frozenExecutionSnapshot()));
+            phases = Map.copyOf(frozen);
+        }
+        phases.forEach((id, phase) -> {
+            if (phase.suspension() != null && (!id.equals(phase.phaseId())
+                    || !runId.equals(phase.suspension().agentRunId())
+                    || !java.util.Objects.equals(tenantId, phase.suspension().tenantId())
+                    || (phase.status() == AgentPhaseStatus.CANCELLED && status != AgentRunStatus.CANCELLED)
+                    || updatedAt == null || updatedAt.isBefore(phase.suspension().suspendedAt())))
+                throw new IllegalArgumentException("agent tool suspension scope changed");
+        });
     }
 }

@@ -1,6 +1,7 @@
 package com.unfurl.foundry.substrate.engine;
 
 import com.unfurl.foundry.substrate.agent.AgentDefinition;
+import com.unfurl.foundry.substrate.agent.AgentDefinitionValidator;
 import com.unfurl.foundry.substrate.agent.AgentPhase;
 import com.unfurl.foundry.substrate.agent.BudgetPolicy;
 import com.unfurl.foundry.substrate.agent.CorrectionPolicy;
@@ -43,6 +44,62 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EmbeddedAgentRuntimeTest {
+
+    /** Suspend contract: stops mid-batch, preserves completed observations and never restarts work on resume. */
+    @Test void capturesApprovalTransactionWithoutExecutingRemainingCallsOrPhases() {
+        var model = new ScriptedModelProvider(List.of(response("batch", List.of(
+                new ModelToolCall("before", "lookup", Map.of("query", "first")),
+                new ModelToolCall("pending", "write", Map.of("value", "raw")),
+                new ModelToolCall("after", "lookup", Map.of("query", "last"))))));
+        var providers = new StaticProviderRegistry().registerModel("model", model);
+        var tools = new DefaultToolRegistry();
+        var lookup = new RecordingToolExecutor(Map.of("found", true));
+        tools.register("lookup", lookup);
+        tools.register("write", (request, context) -> { throw new AssertionError("pending tool executed"); });
+        ToolCallInterceptor policy = new ToolCallInterceptor() {
+            /** Policy Strategy: suspends only the write, retaining final normalized arguments. */
+            @Override public ToolCallDecision before(com.unfurl.foundry.substrate.ports.ToolCallRequest request, ExecutionContext context) {
+                return request.toolName().equals("write") ? ToolCallDecision.requireApproval(Map.of("value", "normalized"),
+                        "approval", Map.of()) : ToolCallDecision.allow(request.arguments());
+            }
+            /** Result Strategy: this fixture makes no result transformations or new authorization decisions. */
+            @Override public ToolCallResult after(com.unfurl.foundry.substrate.ports.ToolCallRequest request,
+                    ToolCallResult result, ExecutionContext context) { return result; }
+        };
+        var events = new java.util.ArrayList<com.unfurl.foundry.substrate.events.AgentEvent>();
+        var runtime = new EmbeddedAgentRuntime(providers, tools, null,
+                new com.unfurl.foundry.substrate.guardrail.BudgetPolicyCostGuardrail(), new AllowAllPermissionBridge(),
+                (event, context) -> events.add(event), new com.unfurl.foundry.substrate.prompt.PromptAssembler(),
+                new com.unfurl.foundry.substrate.resolver.DataReferenceResolver(), new AgentDefinitionValidator(), null,
+                Map.of(), new ToolCallInterceptorChain(List.of(policy)));
+        var agent = new AgentDefinition("agent", "1", Map.of(), List.of(
+                phase("first", Map.of("prompt", "batch"), List.of("lookup", "write"), 2),
+                phase("later", Map.of("prompt", "must not run"), List.of(), 0)), List.of(), Map.of(), "model", List.of("lookup", "write"));
+        var run = runtime.start(agent, Map.of(), ExecutionContext.empty());
+        assertThat(run.status()).isEqualTo(AgentRunStatus.WAITING);
+        var pending = run.phases().get("first");
+        assertThat(pending.status()).isEqualTo(AgentPhaseStatus.WAITING);
+        assertThat(pending.errorCode()).isNull();
+        assertThat(pending.completedAt()).isNull();
+        assertThat(pending.toolCalls()).extracting(com.unfurl.foundry.substrate.runstate.ToolCall::callId).containsExactly("before");
+        assertThat(pending.messages()).anyMatch(message -> message.role() == MessageRole.TOOL && message.toolCallId().equals("before"));
+        assertThat(pending.suspension().arguments()).containsEntry("value", "normalized");
+        assertThat(pending.suspension().remainingCalls()).extracting(ModelToolCall::id).containsExactly("pending", "after");
+        assertThat(pending.suspension().toolCallId()).isNotEqualTo("pending");
+        assertThat(pending.suspension().completedToolIterations()).isZero();
+        assertThat(pending.suspension().maxToolIterations()).isEqualTo(2);
+        assertThat(run.phases().get("later").status()).isEqualTo(AgentPhaseStatus.PENDING);
+        assertThat(events).extracting(com.unfurl.foundry.substrate.events.AgentEvent::eventType).contains(
+                com.unfurl.foundry.substrate.events.AgentEventType.TOOL_APPROVAL_REQUIRED,
+                com.unfurl.foundry.substrate.events.AgentEventType.AGENT_WAITING).doesNotContain(
+                com.unfurl.foundry.substrate.events.AgentEventType.TOOL_FAILED,
+                com.unfurl.foundry.substrate.events.AgentEventType.PHASE_COMPLETED);
+        assertThat(runtime.resume(run.runId(), Map.of("approvalId", "approval"), ExecutionContext.empty())).isEqualTo(run);
+        assertThat(lookup.calls()).hasSize(1);
+        var cancelled = runtime.cancel(run.runId(), ExecutionContext.empty());
+        assertThat(cancelled.status()).isEqualTo(AgentRunStatus.CANCELLED);
+        assertThat(cancelled.phases().get("first").suspension()).isEqualTo(pending.suspension());
+    }
 
     /** Verifies the injected Strategy surrounds both physical provider and admitted tool dispatch. */
     @Test

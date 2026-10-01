@@ -160,6 +160,16 @@ retains that exact scope after normalization, and uses its attempt ID at the ext
 Interceptors cannot replace reserved identity fields. Product decision receipts and approval stores
 remain outside the substrate.
 
+Slice 8A.2b.4b introduces neutral `WAITING` agent/phase snapshots for REQUIRE_APPROVAL, not a
+failed tool observation. `ToolSuspension` retains the engine attempt and normalized request,
+pending ordered model-call batch (at most 256 calls), model identity, completed tool-loop count
+and its original bound, response content, and suspension timestamp. The enclosing phase retains
+resolved input, messages, prior completed tool observations and original start; the run retains
+completed phases and accounted usage. Snapshot JSON is deeply immutable, finite, and depth/size
+bounded. The engine stops the whole scheduler before any pending tool/sibling/model call.
+Resume remains reload-only; a harness cannot replace a suspended child with a fresh turn.
+Foundry owns durable wait projection, receipt integrity and future authorization/claim execution.
+
 `CorrectionProgress` and `CorrectionProgressObserver` expose bounded validation/repair decisions
 without substrate persistence. One phase retains its original policy/start/deadline and monotonically
 increasing attempts; repair model requests carry that exact progress identity. Embedded hosts select
@@ -303,6 +313,10 @@ Together they are a standalone AI-agent orchestration service — and because ev
 ---
 
 ## Enterprise Posture
+
+The budget-context projector composes an inherited caller policy with the declared agent policy
+using lower-of ceilings, never replacement. A malformed present inherited policy fails closed.
+Durable authority snapshots and authorization/claim decisions remain product-owned in Foundry.
 
 The design preserves the same enterprise posture as the deterministic substrate:
 

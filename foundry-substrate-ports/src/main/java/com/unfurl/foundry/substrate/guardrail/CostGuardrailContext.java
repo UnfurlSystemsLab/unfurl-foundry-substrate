@@ -23,13 +23,14 @@ public final class CostGuardrailContext {
     private CostGuardrailContext() {
     }
 
-/**
- * Implements the withAgentBudgetPolicy helper for this component, preserving the surrounding input, output, and edge-case contract.
- */
+/** Projection Strategy: preserves stricter inherited spend/token ceilings and rejects malformed caller policies. */
     public static ExecutionContext withAgentBudgetPolicy(ExecutionContext context, BudgetPolicy policy) {
         ExecutionContext base = context == null ? ExecutionContext.empty() : context;
         Map<String, Object> metadata = new LinkedHashMap<>(base.metadata());
-        metadata.put(AGENT_BUDGET_POLICY, policy == null ? BudgetPolicy.none() : policy);
+        Object inherited = metadata.get(AGENT_BUDGET_POLICY);
+        if (metadata.containsKey(AGENT_BUDGET_POLICY) && !(inherited instanceof BudgetPolicy))
+            throw new IllegalArgumentException("agentBudgetPolicy must be a BudgetPolicy");
+        metadata.put(AGENT_BUDGET_POLICY, BudgetPolicy.lowerOf((BudgetPolicy) inherited, policy));
         return new ExecutionContext(base.tenantId(), base.userId(), base.roles(), base.permissions(),
                 base.correlationId(), base.requestId(), base.traceContext(), metadata);
     }

@@ -6,6 +6,7 @@ package com.unfurl.foundry.substrate.events;
  */
 public enum AgentEventType {
     AGENT_STARTED,
+    AGENT_WAITING,
     AGENT_COMPLETED,
     AGENT_FAILED,
     AGENT_CANCELLED,
@@ -16,6 +17,7 @@ public enum AgentEventType {
     MODEL_INVOKED,
     TOKENS_CONSUMED,
     TOOL_CALLED,
+    TOOL_APPROVAL_REQUIRED,
     TOOL_COMPLETED,
     TOOL_FAILED,
     RAG_RETRIEVED,

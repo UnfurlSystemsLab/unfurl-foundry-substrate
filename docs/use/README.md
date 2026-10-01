@@ -233,7 +233,9 @@ EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(
         "resolve-template",  PromptTemplate.of("Resolve {{category}} with tools")));
 ```
 
-`resume()` exists for port symmetry; substrate's in-memory runner has no suspend point in this slice. Durable suspend/resume lives in `unfurl-foundry`.
+The runner captures tool approval as a real `WAITING` transaction. `resume()` returns the saved
+snapshot without dispatch; executable, authorized durable continuation remains Foundry-owned.
+A harness cannot replace a suspended child with another model turn.
 
 ---
 

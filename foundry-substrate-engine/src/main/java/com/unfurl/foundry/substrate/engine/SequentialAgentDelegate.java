@@ -92,6 +92,12 @@ public final class SequentialAgentDelegate implements AgentDelegate {
         CostAccounting cost = run.cost() == null ? CostAccounting.empty(Map.of("agentRef", request.agentRef())) : run.cost();
         Map<String, Object> provenance = Map.of("agentRef", request.agentRef(), "runId", run.runId());
 
+        if (run.status() == com.unfurl.foundry.substrate.runstate.AgentRunStatus.WAITING) {
+            var pending = run.phases().values().stream()
+                    .filter(phase -> phase.suspension() != null).findFirst().orElseThrow();
+            return new AgentDelegationResult(terminalNormalizer.normalize(pending.output()), null,
+                    effectiveBudget, effectivePermissions, effectiveTools, cost, provenance, request.metadata());
+        }
         if (run.status() == com.unfurl.foundry.substrate.runstate.AgentRunStatus.COMPLETED) {
             AgentTerminalEnvelope terminal = terminalNormalizer.normalize(output);
             if (terminal.status() == AgentTerminalStatus.FAILED) {

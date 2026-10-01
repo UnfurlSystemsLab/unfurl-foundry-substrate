@@ -7,6 +7,7 @@ package com.unfurl.foundry.substrate.runstate;
 public enum AgentPhaseStatus {
     PENDING,
     RUNNING,
+    WAITING,
     COMPLETED,
     FAILED,
     SKIPPED,
