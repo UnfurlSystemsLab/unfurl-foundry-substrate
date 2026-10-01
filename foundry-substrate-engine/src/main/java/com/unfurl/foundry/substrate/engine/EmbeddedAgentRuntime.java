@@ -22,6 +22,9 @@ import com.unfurl.foundry.substrate.model.ModelToolCall;
 import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.ports.AgentEventSink;
 import com.unfurl.foundry.substrate.ports.AgentRuntime;
+import com.unfurl.foundry.substrate.ports.AgentToolContinuation;
+import com.unfurl.foundry.substrate.ports.SuspendedToolExecutor;
+import com.unfurl.foundry.substrate.runstate.ToolSuspension;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
 import com.unfurl.foundry.substrate.ports.OutputSchemaValidator;
 import com.unfurl.foundry.substrate.ports.ProviderRegistry;
@@ -72,7 +75,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * (the lesson from the substrate review). Phase scheduling is dependency- and edge-driven;
  * conditional inbound edges route phases to RUN or SKIPPED.
  */
-public final class EmbeddedAgentRuntime implements AgentRuntime {
+public final class EmbeddedAgentRuntime implements AgentRuntime, AgentToolContinuation {
     private final com.unfurl.foundry.substrate.ports.CorrectionProgressObserver correctionObserver;
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
@@ -308,6 +311,49 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         return loaded;
     }
 
+    /** Continuation Template Method: restores the pre-validation tool loop without initial model/RAG/prompt work; host owns exclusive dispatch. */
+    @Override public AgentRunState continueTool(AgentDefinition definition, AgentRunState waiting,
+            SuspendedToolExecutor executor, ExecutionContext context) {
+        java.util.Objects.requireNonNull(executor, "explicit suspended tool executor is required");
+        java.util.Objects.requireNonNull(waiting, "waiting snapshot is required");
+        validator.validate(definition);
+        if (waiting.status() != AgentRunStatus.WAITING || !definition.id().equals(waiting.agentId())
+                || !definition.version().equals(waiting.agentVersion()) || waiting.cost() == null || waiting.createdAt() == null
+                || !java.util.Objects.equals(waiting.tenantId(), context == null ? null : context.tenantId())
+                || !waiting.phases().keySet().equals(definition.phases().stream().map(AgentPhase::id).collect(java.util.stream.Collectors.toSet())))
+            throw new IllegalArgumentException("tool continuation identity or execution snapshot changed");
+        var saved = waiting.phases().values().stream().filter(p -> p.status() == AgentPhaseStatus.WAITING).findFirst().orElseThrow();
+        var pending = saved.suspension();
+        var phase = definition.phases().stream().filter(p -> p.id().equals(saved.phaseId())).findFirst().orElseThrow();
+        String modelRef = phase.modelRef() == null ? definition.defaultModelRef() : phase.modelRef();
+        if (!pending.modelRef().equals(modelRef) || phase.maxToolIterations() != pending.maxToolIterations()
+                || waiting.phases().values().stream().anyMatch(p -> p != saved && p.status() != AgentPhaseStatus.COMPLETED
+                    && p.status() != AgentPhaseStatus.SKIPPED && p.status() != AgentPhaseStatus.PENDING))
+            throw new IllegalArgumentException("tool continuation phase or loop bounds changed");
+        if (!store.load(waiting.runId(), context).filter(waiting::equals).isPresent())
+            throw new IllegalStateException("tool continuation snapshot is not current");
+        State state = new State(waiting.tenantId(), waiting.runId(), definition, waiting.agentInput(),
+                new LinkedHashMap<>(waiting.phases()), waiting.cost(), waiting.createdAt());
+        // This SPI handles a tool wait before output validation. The host must reject any already-started correction recovery.
+        var messages = new ArrayList<>(saved.messages());
+        var calls = new ArrayList<>(saved.toolCalls());
+        var guardrail = costGuardrail.check(state.cost, CostGuardrailContext.withAgentBudgetPolicy(context, definition.budgetPolicy()));
+        AgentPhaseState result;
+        if (!guardrail.allowed()) {
+            emit(context, state, phase.id(), AgentEventType.GUARDRAIL_TRIPPED, Map.of("reason", String.valueOf(guardrail.reason())));
+            result = failedPhase(phase.id(), saved.input(), messages, "GUARDRAIL_TRIPPED", guardrail.reason(), saved.startedAt());
+        } else {
+            var provider = providerRegistry.resolveModel(modelRef, context).orElse(null);
+            if (provider == null) result = failedPhase(phase.id(), saved.input(), messages, "PROVIDER_MISSING", "No model provider for ref: " + modelRef, saved.startedAt());
+            else result = executeToolLoop(state, phase, provider, modelRef, saved.input(), messages, calls,
+                    new ModelResponse(Message.assistant(pending.responseContent()), pending.remainingCalls(), "tool_use",
+                            com.unfurl.foundry.substrate.model.ModelUsage.zero(), Map.of()), pending.completedToolIterations(),
+                    saved.startedAt(), context, pending, executor);
+        }
+        var terminal = acceptPhaseResult(state, phase, preserveToolObservations(result, calls), context);
+        return terminal.orElseGet(() -> runScheduler(state, context));
+    }
+
 /**
  * Performs the cancel operation for this component, translating validated inputs into the domain result expected by callers.
  */
@@ -344,24 +390,8 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                     continue;
                 }
                 AgentPhaseState result = executePhase(state, phase, context);
-                markPhase(state, phase.id(), result);
-                if (result.status() == AgentPhaseStatus.WAITING) {
-                    var waiting = save(state, AgentRunStatus.WAITING, context);
-                    var transaction = result.suspension();
-                    emit(context, state, phase.id(), AgentEventType.TOOL_APPROVAL_REQUIRED, Map.of(
-                            "tool", transaction.toolName(), "toolCallId", transaction.toolCallId(), "approvalId", transaction.approvalId()));
-                    emitRun(context, waiting, AgentEventType.AGENT_WAITING, Map.of("phaseId", phase.id()));
-                    return waiting;
-                }
-                if (result.status() == AgentPhaseStatus.FAILED) {
-                    emit(context, state, phase.id(), AgentEventType.PHASE_FAILED,
-                            Map.of("errorCode", result.errorCode(), "errorMessage", result.errorMessage()));
-                    AgentRunState failed = save(state, AgentRunStatus.FAILED, context, result.errorCode(), result.errorMessage());
-                    emitRun(context, failed, AgentEventType.AGENT_FAILED, Map.of("failedPhase", phase.id()));
-                    return failed;
-                }
-                emit(context, state, phase.id(), AgentEventType.PHASE_COMPLETED, Map.of());
-                save(state, AgentRunStatus.RUNNING, context);
+                var terminal = acceptPhaseResult(state, phase, result, context);
+                if (terminal.isPresent()) return terminal.orElseThrow();
             }
         } while (progressed);
 
@@ -379,6 +409,28 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         AgentRunState completed = save(state, AgentRunStatus.COMPLETED, context);
         emitRun(context, completed, AgentEventType.AGENT_COMPLETED, Map.of());
         return completed;
+    }
+
+    /** Scheduler Projector: shared fresh/continued phase commit and events; terminal waits/failures halt all later work. */
+    private java.util.Optional<AgentRunState> acceptPhaseResult(State state, AgentPhase phase, AgentPhaseState result, ExecutionContext context) {
+        markPhase(state, phase.id(), result);
+        if (result.status() == AgentPhaseStatus.WAITING) {
+            var waiting = save(state, AgentRunStatus.WAITING, context);
+            var transaction = result.suspension();
+            emit(context, state, phase.id(), AgentEventType.TOOL_APPROVAL_REQUIRED, Map.of(
+                    "tool", transaction.toolName(), "toolCallId", transaction.toolCallId(), "approvalId", transaction.approvalId()));
+            emitRun(context, waiting, AgentEventType.AGENT_WAITING, Map.of("phaseId", phase.id()));
+            return java.util.Optional.of(waiting);
+        }
+        if (result.status() == AgentPhaseStatus.FAILED) {
+            emit(context, state, phase.id(), AgentEventType.PHASE_FAILED, Map.of("errorCode", result.errorCode(), "errorMessage", result.errorMessage()));
+            var failed = save(state, AgentRunStatus.FAILED, context, result.errorCode(), result.errorMessage());
+            emitRun(context, failed, AgentEventType.AGENT_FAILED, Map.of("failedPhase", phase.id()));
+            return java.util.Optional.of(failed);
+        }
+        emit(context, state, phase.id(), AgentEventType.PHASE_COMPLETED, Map.of());
+        save(state, AgentRunStatus.RUNNING, context);
+        return java.util.Optional.empty();
     }
 
 /**
@@ -420,8 +472,28 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
         }
         ModelResponse response = firstCall.response();
         messages.add(response.message() == null ? Message.assistant("") : response.message());
+        return executeToolLoop(state, phase, provider, modelRef, resolvedInput, messages, toolCalls, response, 0, started, context, null, null);
+    }
 
-        int iterations = 0;
+    /** Shared Loop Strategy: consumes fresh or saved batches under the same policy, observation, mapping and validation pipeline. */
+    private AgentPhaseState executeToolLoop(State state, AgentPhase phase, ModelProvider provider, String modelRef,
+            Map<String, Object> resolvedInput, List<Message> messages, List<ToolCall> toolCalls, ModelResponse response,
+            int iterations, Instant started, ExecutionContext context, ToolSuspension pending, SuspendedToolExecutor pendingExecutor) {
+        return preserveToolObservations(executeToolLoopBody(state, phase, provider, modelRef, resolvedInput,
+                messages, toolCalls, response, iterations, started, context, pending, pendingExecutor), toolCalls);
+    }
+
+    /** Failure Projector: preserves all completed observations even when validation, model or admission fails after a tool. */
+    private AgentPhaseState preserveToolObservations(AgentPhaseState result, List<ToolCall> calls) {
+        if (result.status() != AgentPhaseStatus.FAILED) return result;
+        return new AgentPhaseState(result.phaseId(), result.status(), result.input(), result.messages(), calls,
+                result.output(), result.errorCode(), result.errorMessage(), result.startedAt(), result.completedAt());
+    }
+
+    /** Loop Strategy: processes the residual batch, then normal model turns, retaining the original finite iteration bound. */
+    private AgentPhaseState executeToolLoopBody(State state, AgentPhase phase, ModelProvider provider, String modelRef,
+            Map<String, Object> resolvedInput, List<Message> messages, List<ToolCall> toolCalls, ModelResponse response,
+            int iterations, Instant started, ExecutionContext context, ToolSuspension pending, SuspendedToolExecutor pendingExecutor) {
         while (response.hasToolCalls() && iterations < phase.maxToolIterations()) {
             if (response.toolCalls().size() > 256) return failedPhase(phase.id(), resolvedInput, messages,
                     "TOOL_BATCH_TOO_LARGE", "Model tool batch exceeds 256 calls", started);
@@ -431,11 +503,14 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                     return failedPhase(phase.id(), resolvedInput, messages, "TOOL_NOT_ALLOWED",
                             "Tool not allowed for phase: " + call.toolName(), started);
                 }
+                boolean retained = pending != null && iterations == pending.completedToolIterations() && callIndex == 0;
                 var toolScope = new com.unfurl.foundry.substrate.ports.ToolCallScope(
-                        state.tenantId, state.runId, phase.id(), UUID.randomUUID().toString());
+                        state.tenantId, state.runId, phase.id(), retained ? pending.toolCallId() : UUID.randomUUID().toString());
                 ToolCallRequest originalRequest = new ToolCallRequest(
                         call.id(), call.toolName(), call.arguments(), toolScope.metadata());
-                ToolCallDecision interceptorDecision = toolCallInterceptors.before(originalRequest, context);
+                ToolCallDecision interceptorDecision = retained
+                        ? new ToolCallDecision(ToolCallDecisionType.ALLOW, pending.arguments(), null, pending.requestMetadata())
+                        : toolCallInterceptors.before(originalRequest, context);
                 toolScope.verify(interceptorDecision.metadata());
                 Map<String, Object> effectiveArguments = interceptorDecision.arguments();
                 if (interceptorDecision.type() == ToolCallDecisionType.REQUIRE_APPROVAL) {
@@ -468,8 +543,8 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                     return failedPhase(phase.id(), resolvedInput, messages, "PERMISSION_DENIED",
                             "Tool not permitted: " + call.toolName(), started);
                 }
-                ToolExecutor executor = toolRegistry.resolveTool(call.toolName(), context).orElse(null);
-                if (executor == null) {
+                ToolExecutor executor = retained ? null : toolRegistry.resolveTool(call.toolName(), context).orElse(null);
+                if (!retained && executor == null) {
                     return failedPhase(phase.id(), resolvedInput, messages, "TOOL_MISSING",
                             "No executor for tool: " + call.toolName(), started);
                 }
@@ -477,7 +552,9 @@ public final class EmbeddedAgentRuntime implements AgentRuntime {
                 Instant toolStart = Instant.now();
                 ToolCallRequest effectiveRequest = new ToolCallRequest(
                         call.id(), call.toolName(), effectiveArguments, interceptorDecision.metadata());
-                ToolCallResult toolResult = externalCallBoundary.invoke(new ExternalCallBoundary.Call(
+                ToolCallResult toolResult = retained
+                        ? java.util.Objects.requireNonNull(pendingExecutor.execute(pending, effectiveRequest, context), "suspended tool executor returned no result")
+                        : externalCallBoundary.invoke(new ExternalCallBoundary.Call(
                         state.tenantId, state.runId, toolScope.toolCallId(),
                         ExternalCallBoundary.Kind.TOOL, call.toolName(), effectiveRequest),
                         () -> executor.execute(effectiveRequest, context));

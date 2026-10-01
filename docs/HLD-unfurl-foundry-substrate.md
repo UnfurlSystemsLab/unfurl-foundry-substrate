@@ -170,6 +170,38 @@ bounded. The engine stops the whole scheduler before any pending tool/sibling/mo
 Resume remains reload-only; a harness cannot replace a suspended child with a fresh turn.
 Foundry owns durable wait projection, receipt integrity and future authorization/claim execution.
 
+The 4c.3a prerequisite strengthens Foundry's existing external-call journal, not the neutral
+engine: forced atomic file commits and complete-record CAS protect pre-dispatch evidence and
+reconciliation against competing terminal writers. Recovery requires host-established dispatcher
+quiescence and never replays an external operation. A result digest is not a saved response;
+executable continuation must separately account for protected result hydration. This prerequisite
+does not change reload-only resume or introduce a substrate storage/coordination dependency.
+
+4c.3b adds product-owned original-wait ownership without changing neutral WAITING. Foundry
+CAS-claims the exact envelope with narrowed authority before consuming its exact approval,
+then CAS-records successful consumption. Interrupted commits remain owned and are classified
+without takeover or replay. Receipt integrity and approval state are both required; a consumed
+grant alone is not executable authority. Ordinary resume and harness waits remain state-only.
+
+4c.3c.1 establishes product-owned protected tool-result receipts and explicit no-replay hydration.
+Raw neutral responses are saved before journal completion, outside content-free provenance. Exact
+intent/receipt identity and matching completed digest are required to return a response; a saved
+receipt may reconcile a quiescent interrupted dispatch by CAS. Missing or uncertain results never
+authorize replay. This remains above the substrate and does not enable original-loop execution.
+
+4c.3c.2 introduces an explicit neutral `AgentToolContinuation` SPI, separate from state-only
+`AgentRuntime.resume`. The embedded engine reuses its existing tool loop, output validation,
+correction pipeline and scheduler with the saved phase input/transcript, original run/phase start,
+accounted cost, completed observations and remaining batch/iteration bound. It never repeats initial
+prompt assembly, retrieval or the already-accounted model call. An explicit host-owned
+`SuspendedToolExecutor` supplies the original attempt's raw response by governed dispatch or proven
+hydration; it owns authorization, claims, journal and no-replay guarantees. The neutral engine does
+not consume a grant or rerun before-call policy for that first normalized request. It still checks
+tool allowlists, current permission and budget, and applies the configured after-call policy once.
+Remaining calls use ordinary before/after policy and external boundaries, and may suspend again.
+The host pins definition/ports and serializes continuation; no atomic/concurrent ownership is claimed
+by this SPI. Foundry does not bind it until 4c.3c.3 supplies durable dispatch/evidence transitions.
+
 `CorrectionProgress` and `CorrectionProgressObserver` expose bounded validation/repair decisions
 without substrate persistence. One phase retains its original policy/start/deadline and monotonically
 increasing attempts; repair model requests carry that exact progress identity. Embedded hosts select

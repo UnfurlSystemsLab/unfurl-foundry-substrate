@@ -41,6 +41,16 @@ state-store port, without persistence or authorization code. Harness/delegate ad
 semantics and do not treat a suspended child as permission to start another turn. Atomic claims,
 durable receipt validation, approvals and external-result reconciliation remain product concerns.
 
+4c.3c.2 adds a separate neutral continuation SPI and explicit host-owned pending-result Strategy.
+Refactor rather than duplicate the existing loop and scheduler outcome handling. Continue from
+saved normalized first request, residual batch, transcript, cost and original timestamps; do not
+rerun initial model/RAG/prompt assembly or grant checks in the neutral layer. Shared current budget,
+allowlist/permission, after-policy, later-call before-policy, mapping, validation/correction and graph
+scheduling still apply. Test restart in a new engine, normalization/scope retention, repeated waits,
+loop bounds, failure/uncertainty, guardrails, tenant/state/definition drift and no duplicate model
+usage. Install the complete substrate reactor before building Foundry; product dispatch wiring and
+durable lifecycle/evidence recovery remain 4c.3c.3.
+
 The implementation-ready file/type/test backlog and migration order are maintained in
 [`IMPLEMENTATION-agent-harness-contract-backlog.md`](IMPLEMENTATION-agent-harness-contract-backlog.md).
 

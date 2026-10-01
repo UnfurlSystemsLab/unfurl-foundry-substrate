@@ -391,6 +391,45 @@ without selecting context, resolving definitions or dispatching. Harness and del
 project WAITING_FOR_APPROVAL; harness resume of a suspended child explicitly refuses a replacement
 turn until governed tool continuation is implemented. Persistence and authorized execution stay Foundry-owned.
 
+4c.3a leaves these neutral contracts unchanged. The product external-call journal gains exact
+record CAS and forced atomic file commits before continuation dispatch can be wired. Only a
+DISPATCHING record may become COMPLETED, FAILED or OUTCOME_UNKNOWN; immutable call identity,
+request/binding, idempotency key and dispatch time must survive. Recovery resolves outside locks
+and CAS-commits classifications, returning a competing terminal winner on contention. Hosts must
+establish dispatcher quiescence first. Digests remain content-free and cannot hydrate tool results.
+
+4c.3b also leaves neutral state and ports unchanged. Foundry keeps original WAITING/memento
+while a content-digested envelope receipt records exclusive claim identity and a later consumption
+receipt. Both commits use full-envelope CAS; only the first winner consumes the exact bound grant.
+Authenticated read-only inspection distinguishes unconsumed, uncertain-consumption, proven-consumed,
+blocked and cancelled claims. A pending REQUIRE_APPROVAL policy remains nondispatchable even when
+claim evidence explains a now-CONSUMED grant. No receipt/observation is a dispatch capability.
+
+4c.3c.1 adds no neutral runtime API. Foundry snapshots raw `ToolCallResult` (including structured
+failure and metadata) in bounded canonical JSON before content-free journal completion. Its result
+port is write-once and protects exact engine-attempt/request/binding/dispatch identity. Response
+persistence failure after physical invocation remains DISPATCHING, not a fabricated failed call.
+Explicit recovery CAS-proves matching completion before hydrating fresh typed results, without
+tool invocation or policy re-evaluation. Missing results and uncertain outcomes remain nondispatchable.
+
+4c.3c.2 adds `AgentToolContinuation.continueTool(definition, waiting, executor, context)` and a
+mandatory `SuspendedToolExecutor.execute(suspension, normalizedRequest, context)` Strategy. There
+is no default executor: the host must claim/revalidate exact authority, bind frozen definition/ports
+and provide single-owner at-most-once dispatch or exact raw response hydration. Validate definition,
+tenant, phase set, saved model/iteration bounds, scheduler state, original accounting/time and exact
+stored waiting observation before any port invocation. This is observation equality, not an atomic
+claim. The host must prove there is no prior correction progress on the waiting phase using its
+protected provenance; neutral run state does not carry that proof. This memento is the pre-validation
+tool loop, not a mechanism for restarting an interrupted correction. The first pending call retains
+saved normalized arguments and all engine scope; skip only its before-call policy/registry dispatch
+and delegate response ownership to the explicit executor. Shared allowlist/permission checks and a
+pre-continuation lower-of guardrail remain mandatory. After-call normalization, tool observations,
+messages, mapped output, follow-up model calls, correction and subsequent scheduling use the same
+methods as fresh execution. Restore `completedToolIterations`, preserve original timestamps/cost,
+and do not append a duplicate saved assistant message. Later calls mint fresh scope and may create
+a new wait. Ordinary resume remains reload-only. Host uncertainty propagates without fake outcomes
+or further model/sibling execution; durable post-result/correction recovery is still product-owned.
+
 The public JSON/YAML codec binds Jackson's Java Time module explicitly, emits ISO timestamps and
 retains untyped decimal values as BigDecimal so suspended snapshots round-trip without precision loss.
 Foundry's file-backed agent envelope reader applies the same decimal preservation.
