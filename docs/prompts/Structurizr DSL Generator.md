@@ -147,7 +147,81 @@ distribution happens through GitHub Packages via the root aggregator's `publish-
 
 ---
 
-## 4. Structurizr DSL Requirements
+## 4. Integration Ports & Extensibility
+
+The substrate is extended almost entirely through ports that a host implements. Model every
+**open DCP port**, meaning an integration concern the library declares but does not satisfy itself,
+as an explicit extensibility option. This lets readers see where authentication, authorization,
+monitoring, cost, tracking and similar concerns plug in.
+
+### 4.1 Sources
+
+- **DCP vocabulary for integration ports** (sibling checkout `../dcp`, if present):
+  - `../dcp/docs/elements/integration-ports.md`: the common ports `authentication`, `authorization`,
+    `telemetry`, `monitoring`, `secrets`, `configuration` and `ai`;
+  - `../dcp/docs/DCP-VOCABULARY.md`;
+  - `../dcp/docs/HLD-C-dcp-v0.2-internal.md`: components consume the customer's identity provider
+    through a port, emit to the customer's audit sink, and export telemetry to the customer's
+    collector.
+- **Every claim** in `*/src/main/resources/META-INF/unfurl-catalog.yaml`:
+  - `needs` entries, especially those with `owner=host` or `owner=customer-*`, and their `shape=`
+    port type;
+  - any `integration_ports.ports` block.
+- **Port interfaces:** `foundry-substrate-ports` (`ports`, `guardrail`), plus `ExternalCallBoundary`,
+  `AgentRunStore` and `AgentHarnessStateStore` in the engine.
+- **Defaults:** the in-memory and no-op defaults, and the null-port fallbacks in
+  `EmbeddedAgentRuntime` (e.g. `defaultEventSink()`, `defaultStore()`).
+
+### 4.2 Extensibility matrix (seed — verify every row)
+
+Classify each concern with exactly one **status**:
+- `Implemented default`: a usable default ships in this repository.
+- `No-op / in-memory default`: it runs but does not persist or export anything.
+- `Open port`: an interface exists, with no implementation here.
+- `Host-owned`: the library consumes the concern but defines no port for it.
+- `Not present`: neither a port nor a default exists. List it as a gap, and never invent it.
+
+| Concern (DCP port) | Substrate seam | Shipped default | Expected status |
+|---|---|---|---|
+| Authentication (`authentication`) | Consumes `com.unfurl.substrate.policy.ExecutionContext` (tenantId, userId, roles, permissions, correlationId, requestId, traceContext) from the host | None | Host-owned |
+| Authorization (`authorization`) | `guardrail.PermissionBridge` / `PermissionDecision`; `ToolCallInterceptor(Chain)` returning `ToolCallDecision` (ALLOW / DENY / REQUIRE_APPROVAL); `ToolCallScope` | Verify | Open port |
+| Cost & budgets | `guardrail.CostGuardrail`, `CostGuardrailContext`, `GuardrailDecision`; `BudgetPolicy.lowerOf`; `runstate.CostAccounting`; `TOKENS_CONSUMED` events | `BudgetPolicyCostGuardrail` (no I/O, current-run snapshot only) | Implemented default; persistent quota and billing are host-owned |
+| Monitoring / telemetry / tracking (`monitoring`, `telemetry`) | `AgentEventSink` with `AgentEventType` (agent, phase, model, token, tool, RAG, guardrail and validation events); `CorrectionProgressObserver`; `ExecutionContext.traceContext` | Verify `defaultEventSink()` | No-op / in-memory default |
+| Audit & durable tracking | `ExternalCallBoundary` (host journals each provider/tool/child/workflow call); `AgentRunStore`; `AgentHarnessStateStore` | Direct boundary; in-memory stores | No-op / in-memory default |
+| AI model access (`ai`) | `ModelProvider`, `ProviderRegistry`; needs `model-provider@v1`, `spring-ai.chat-client@v1?owner=host` | Spring AI adapter over host beans | Open port + adapter |
+| Embeddings, vector, RAG (`ai`) | `EmbeddingProvider`, `VectorStore`, `RagRetriever`; needs `embedding-provider@v1`, `vector-store@v1`, `rag.corpus@v1?owner=host` | Spring AI adapter; test fixtures | Open port + adapter |
+| Tools | `ToolRegistry`, `ToolExecutor`; need `tool.implementation@v1?owner=host` | Test fixtures only | Open port |
+| Context & request shaping | `ContextSelector`, `ContextResourceProvider`, `ModelRequestProjector` | `ModelRequestProjector.identity()` | Implemented default (identity) |
+| Validation | `OutputSchemaValidator`, `SemanticValidator(Registry)` | Verify | Open port |
+| Durable continuation | `AgentToolContinuation`, `SuspendedToolExecutor`, `AgentHarnessChildContinuation` | No default executor, by design | Open port |
+| Secrets (`secrets`), configuration (`configuration`) | No port: the host constructs providers with their own credentials and configuration | None | Host-owned |
+
+### 4.3 How to model it
+
+- **Extension points:** model each one as a component in the module that defines its port, with:
+  - the tag `Extension Point` and shape `Hexagon`;
+  - properties `dcpPort`, `portTypes`, `status`, `defaultImplementation` and `claimNeed`
+    (the exact need string, when one exists).
+- **Customer-supplied systems:** for each `Open port` or `Host-owned` concern, add an external
+  system tagged `Customer-supplied` that represents the implementation a host plugs in. Examples:
+  - "Host Identity & Access (OIDC / IdP)";
+  - "Host Policy Engine";
+  - "Host Telemetry Collector (OTLP)";
+  - "Host Audit Store";
+  - "Host Cost & Usage Ledger";
+  - "Host Model / Vector Providers";
+  - "Host Tool Implementations".
+- **Extension edges:** connect the customer-supplied system to the extension point, tagged
+  `Extension` and drawn dashed, using `"Implements <PortType>" "Java SPI (host-supplied, in-process)"`.
+  Name a concrete protocol such as OTLP or OIDC only if this repository's docs or code name it;
+  otherwise keep the label protocol-neutral.
+- **"Extensibility" view:** a dedicated component or module view that shows only the extension points,
+  their modules and the customer-supplied systems. Keep it readable by giving each concern one
+  extension-point component, with the individual port types listed in its description.
+
+---
+
+## 5. Structurizr DSL Requirements
 
 - **One `workspace`** with `name` and `description` (stating the convention in §2),
   `!identifiers hierarchical`, one `model` and one `views` block. Use stable lowercase identifiers
@@ -156,9 +230,11 @@ distribution happens through GitHub Packages via the root aggregator's `publish-
   e.g. `// source: foundry-substrate-engine/pom.xml; ArchitectureTest.moduleEdgesMatchAllowedGraph`.
 - **Tags and styles:**
   - Tags: `Library`, `Library Module`, `Sample Claim`, `Test Fixture`, `External Library`,
-    `Host-owned`, `Planned`.
-  - Shapes: `Component` for Library Module, `Folder` for Sample Claim, and grey for External Library.
-  - Host-owned relationships: dashed.
+    `Host-owned`, `Extension Point`, `Customer-supplied`, `Extension`, `Planned`.
+  - Shapes: `Component` for Library Module, `Folder` for Sample Claim, `Hexagon` for Extension Point,
+    and grey for External Library.
+  - Customer-supplied elements: a distinct outline colour.
+  - Host-owned and Extension relationships: dashed.
 - **Readability:**
   - Keep each component view to about 12 elements by collapsing families.
   - Give every view an explicit `include` and a `title`.
@@ -170,7 +246,7 @@ distribution happens through GitHub Packages via the root aggregator's `publish-
 
 ---
 
-## 5. Validation and Output
+## 6. Validation and Output
 
 1. Write `docs/architecture/workspace.dsl`.
 2. Validate it with whichever is available:
@@ -184,6 +260,8 @@ distribution happens through GitHub Packages via the root aggregator's `publish-
 4. Report:
    - the verified module table and any differences from §1.2;
    - the module edges compared with `moduleEdgesMatchAllowedGraph`;
+   - the verified **extensibility matrix** (§4.2) with the final status of each concern, plus every
+     claim `need` with `owner=host` or `owner=customer-*` that no extension point covers;
    - omitted or unverifiable items;
    - the render command:
      `docker run -it --rm -p 8090:8080 -v <repo>/docs/architecture:/usr/local/structurizr structurizr/lite`.
