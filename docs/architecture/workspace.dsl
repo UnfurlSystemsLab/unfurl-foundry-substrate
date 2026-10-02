@@ -1,11 +1,12 @@
-// unfurl-foundry-substrate â€” C4 architecture model (as built), Structurizr DSL.
-// Generated from docs/prompts/Structurizr DSL Generator.md on 2026-10-02 at commit 02b01a9.
+// unfurl-foundry-substrate — C4 architecture model (as built), Structurizr DSL.
+// Generated from docs/prompts/Structurizr DSL Generator.md; reconciled on 2026-10-02 with the current implementation.
+// concern labels are descriptive categories, not named DCP claim ports. claimNeed records actual catalog needs.
 // Every element and relationship cites its evidence. This repository deploys nothing, so there is no
 // deployment view; the backlog (docs/IMPLEMENTATION-agent-harness-contract-backlog.md) reports slices
 // 1-7 implemented, so no Planned elements exist.
 // Render: docker run -it --rm -p 8090:8080 -v <repo>/docs/architecture:/usr/local/structurizr structurizr/lite
 
-workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Convention: because this repository has no deployables, Level 2 'containers' are published Maven modules (tag 'Library Module'); Level 3 components are package groupings and key types. Module edges are Maven compile dependencies and match ArchitectureTest.moduleEdgesMatchAllowedGraph. The substrate opens no sockets: every network interaction belongs to a host-supplied implementation and is tagged 'Host-owned'. Open DCP integration ports are modelled as 'Extension Point' components with 'Customer-supplied' implementations." {
+workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Convention: because this repository has no deployables, Level 2 'containers' are published Maven modules (tag 'Library Module'); Level 3 components are package groupings and key types. Module dependency edges are direct Maven compile dependencies; sample edges are separately labelled DCP needs. ArchitectureTest checks allowed Java class dependencies (not exact POM equality) and excludes the optional Spring AI adapter. The substrate opens no sockets: every network interaction belongs to a host-supplied implementation and is tagged 'Host-owned'. Neutral Java SPI seams are modelled as 'Extension Point' components with 'Customer-supplied' implementations." {
 
     !identifiers hierarchical
 
@@ -89,7 +90,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: ports/ModelProvider.java, ProviderRegistry.java, ProviderKind.java, EmbeddingProvider.java, VectorStore.java, RagRetriever.java
                     ai = component "AI Provider Ports" "ModelProvider, ProviderRegistry, EmbeddingProvider, VectorStore, RagRetriever. Implemented by springai-adapter or the host; RAG retrieval is off unless a RagRetriever is bound." "Java interfaces" "Extension Point" {
                         properties {
-                            "dcpPort" "ai"
+                            "concern" "ai"
                             "claimNeed" "model-provider@v1; embedding-provider@v1; vector-store@v1; rag.corpus@v1?owner=host; spring-ai.chat-client@v1?owner=host; spring-ai.embedding-client@v1?owner=host; spring-ai.vector-store@v1?owner=host"
                             "status" "Open port + adapter"
                             "defaultImplementation" "none (springai-adapter and test fixtures available)"
@@ -98,7 +99,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: ports/ToolRegistry.java, ToolExecutor.java; tools/DefaultToolRegistry.java
                     tools_ports = component "Tool Ports" "ToolRegistry and ToolExecutor. DefaultToolRegistry ships; executors are host-owned." "Java interfaces" "Extension Point" {
                         properties {
-                            "dcpPort" "tools"
+                            "concern" "tools"
                             "claimNeed" "tool.implementation@v1?owner=host"
                             "status" "Open port"
                             "defaultImplementation" "DefaultToolRegistry (registry only)"
@@ -107,7 +108,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: guardrail/PermissionBridge.java, PermissionDecision.java; ports/ToolCallInterceptor.java, ToolCallInterceptorChain.java, ToolCallDecision.java, ToolCallScope.java; engine/AllowAllPermissionBridge.java
                     authorization = component "Authorization Ports" "PermissionBridge and the ToolCallInterceptor chain returning ALLOW / DENY / REQUIRE_APPROVAL with an engine-minted ToolCallScope. Defaults allow everything." "Java interfaces" "Extension Point" {
                         properties {
-                            "dcpPort" "authorization"
+                            "concern" "authorization"
                             "status" "No-op default (allow-all)"
                             "defaultImplementation" "AllowAllPermissionBridge; ToolCallInterceptorChain.empty()"
                         }
@@ -115,7 +116,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: guardrail/CostGuardrail.java, CostGuardrailContext.java, GuardrailDecision.java, BudgetPolicyCostGuardrail.java; domain BudgetPolicy.lowerOf, runstate/CostAccounting.java
                     cost = component "Cost & Budget Guardrails" "CostGuardrail with CostGuardrailContext (agentBudgetPolicy, outerBudgetRemainingUsd) and lower-of budget composition; TOKENS_CONSUMED metering." "Java" "Extension Point" {
                         properties {
-                            "dcpPort" "cost (no standard DCP port name)"
+                            "concern" "cost (no standard DCP port name)"
                             "status" "Implemented default"
                             "defaultImplementation" "BudgetPolicyCostGuardrail (no I/O, current-run snapshot only)"
                         }
@@ -123,7 +124,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: ports/AgentEventSink.java, CorrectionProgressObserver.java; events/AgentEventType.java; EmbeddedAgentRuntime.defaultEventSink()
                     telemetry = component "Event & Telemetry Ports" "AgentEventSink for metering-grade agent, phase, model, token, tool, RAG, guardrail and validation events; CorrectionProgressObserver." "Java interfaces" "Extension Point" {
                         properties {
-                            "dcpPort" "telemetry, monitoring"
+                            "concern" "telemetry, monitoring"
                             "status" "No-op default"
                             "defaultImplementation" "no-op event sink; CorrectionProgressObserver.noop()"
                         }
@@ -131,7 +132,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: ports/OutputSchemaValidator.java, SemanticValidator.java, SemanticValidatorRegistry.java, ValidationResult.java; EmbeddedAgentRuntime short constructor passes null validators
                     validation = component "Validation Ports" "OutputSchemaValidator and SemanticValidator(Registry) driving the bounded correction loop. Not bound by default." "Java interfaces" "Extension Point" {
                         properties {
-                            "dcpPort" "validation (no standard DCP port name)"
+                            "concern" "validation (no standard DCP port name)"
                             "status" "Open port"
                             "defaultImplementation" "none"
                         }
@@ -139,7 +140,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: ports/ContextSelector.java, ContextResourceProvider.java, ModelRequestProjector.java (identity())
                     context = component "Context Ports" "ContextSelector, ContextResourceProvider and ModelRequestProjector applied before every model call." "Java interfaces" "Extension Point" {
                         properties {
-                            "dcpPort" "context (no standard DCP port name)"
+                            "concern" "context (no standard DCP port name)"
                             "status" "Implemented default (identity)"
                             "defaultImplementation" "ModelRequestProjector.identity()"
                         }
@@ -147,7 +148,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: ports/AgentToolContinuation.java, SuspendedToolExecutor.java, AgentHarnessChildContinuation.java, CorrectionProgress.java
                     continuation = component "Continuation Ports" "AgentToolContinuation, SuspendedToolExecutor and AgentHarnessChildContinuation for host-governed resumption of approval waits." "Java interfaces" "Extension Point" {
                         properties {
-                            "dcpPort" "durable continuation (no standard DCP port name)"
+                            "concern" "durable continuation (no standard DCP port name)"
                             "status" "Open port"
                             "defaultImplementation" "none, by design (no default executor)"
                         }
@@ -194,15 +195,17 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
                     // source: engine/SequentialAgentDelegate.java
                     delegate = component "Sequential Agent Delegate" "Invokes pinned child agents with narrowed permissions and lower-of budgets." "AgentDelegate"
                     // source: engine/ExternalCallBoundary.java (direct()), AgentRunStore.java, AgentHarnessStateStore.java
-                    durability = component "Call Boundary & State Stores" "ExternalCallBoundary around provider, tool, child-agent and workflow dispatch; AgentRunStore and AgentHarnessStateStore with compare-and-set transitions." "Java interfaces" "Extension Point" {
+                    durability = component "Call Boundary & State Stores" "ExternalCallBoundary wraps external dispatch without owning persistence. AgentRunStore exposes save/load only; AgentHarnessStateStore additionally exposes compare-and-set transition for harness claims. Durability, authorization and cross-process coordination belong to the host." "Java interfaces" "Extension Point" {
                         properties {
-                            "dcpPort" "audit / durable tracking (no standard DCP port name)"
+                            "concern" "audit / durable tracking (no standard DCP port name)"
                             "status" "No-op / in-memory default"
-                            "defaultImplementation" "ExternalCallBoundary.direct(); InMemoryAgentRunStore; InMemoryAgentHarnessStateStore"
+                            "defaultImplementation" "ExternalCallBoundary.direct(); process-local run snapshots; InMemoryAgentHarnessStateStore"
+                            "agentStoreOperations" "save/load only; no CAS"
+                            "harnessStoreOperations" "save/load/transition; default CAS is process-local"
                         }
                     }
-                    // source: engine/InMemoryAgentRunStore.java, InMemoryAgentHarnessStateStore.java, NoopAgentEventSink.java, AllowAllPermissionBridge.java, AllowAllCostGuardrail.java
-                    defaults = component "In-process Defaults" "InMemoryAgentRunStore, InMemoryAgentHarnessStateStore, NoopAgentEventSink, AllowAllPermissionBridge, AllowAllCostGuardrail." "Java"
+                    // source: EmbeddedAgentRuntime constructors, defaultStore(), defaultEventSink(); InMemoryAgentHarnessStateStore
+                    defaults = component "In-process Defaults" "Short constructor binds BudgetPolicyCostGuardrail, AllowAllPermissionBridge, empty tool interceptors, a no-op AgentEventSink and a process-local run snapshot store. Harness uses InMemoryAgentHarnessStateStore. AllowAllCostGuardrail is an optional Strategy, not the runtime default." "Java (Strategy / Null Object)"
                 }
             }
 
@@ -234,11 +237,13 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
         }
 
         // ================================================================== Module edges (Maven compile dependencies)
-        // source for every edge in this block: the origin module's pom.xml and ArchitectureTest.ALLOWED_MODULE_EDGES
+        // source for every edge in this block: the origin module's pom.xml.
+        // ArchitectureTest constrains Java class dependencies; allowed transitive edges are not direct POM edges.
 
         substrate.domain -> unfurl_substrate "Extends substrate-domain records" "Maven compile dependency"
         substrate.domain -> jackson "Annotates records for binding and validation" "Maven compile dependency"
         substrate.events -> unfurl_substrate "Extends substrate-events" "Maven compile dependency"
+        substrate.events -> jackson "Bean Validation annotations" "Maven compile dependency"
         substrate.ports -> substrate.domain "Uses agent, model, tool and run-state records" "Maven compile dependency"
         substrate.ports -> substrate.events "Emits AgentEvent" "Maven compile dependency"
         substrate.ports -> unfurl_substrate "Uses substrate-ports and policy (ExecutionContext)" "Maven compile dependency"
@@ -261,10 +266,15 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
         substrate.engine -> substrate.resolver "Resolves phase inputs and references" "Maven compile dependency"
         substrate.engine -> substrate.offers "Uses offer and invocation types" "Maven compile dependency"
         substrate.engine -> substrate.domain "Executes agent definitions" "Maven compile dependency"
+        substrate.engine -> substrate.ports "Uses runtime, provider, policy and continuation ports" "Maven compile dependency"
+        substrate.engine -> jackson "Serializes tool result messages" "Maven compile dependency"
+        substrate.testing -> substrate.domain "Builds domain fixtures" "Maven compile dependency"
         substrate.testing -> substrate.tools "Provides tool fixtures" "Maven compile dependency"
         substrate.testing -> substrate.rag "Provides retrieval fixtures" "Maven compile dependency"
         substrate.testing -> substrate.ports "Implements provider and tool ports" "Maven compile dependency"
         substrate.springai -> substrate.domain "Maps model and tool records" "Maven compile dependency"
+        substrate.springai -> substrate.ports "Implements neutral provider ports" "Maven compile dependency"
+        substrate.springai -> jackson "Maps JSON tool arguments" "Maven compile dependency"
         substrate.springai -> spring_ai "Wraps ChatModel, EmbeddingModel and VectorStore" "Maven compile dependency"
 
         // ================================================================== Sample claims (design time)
@@ -344,7 +354,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
         embedding_host -> model_vendors "Calls vendors through its own provider implementations" "HTTPS (host-owned)" "Host-owned"
 
         // ================================================================== Extension edges (customer-supplied implementations)
-        // source: Â§4.2 seams listed on each Extension Point component
+        // source: §4.2 seams listed on each Extension Point component
         host_identity -> substrate.engine.agent_runtime "Supplies ExecutionContext (tenant, user, roles, permissions, correlation, trace) on every call" "Java API (host-supplied, in-process)" "Extension"
         host_policy -> substrate.ports.authorization "Implements PermissionBridge / ToolCallInterceptor" "Java SPI (host-supplied, in-process)" "Extension"
         host_cost -> substrate.ports.cost "Implements CostGuardrail" "Java SPI (host-supplied, in-process)" "Extension"
@@ -361,14 +371,14 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
     views {
 
         systemContext substrate "SystemContext" "Level 1: the substrate library, its consumers, upstream libraries and host-owned vendors." {
-            title "Unfurl Foundry Substrate â€” System Context"
+            title "Unfurl Foundry Substrate — System Context"
             include developer foundry flow embedding_host fabric unfurl_substrate unfurl_dcp spring_ai jackson model_vendors
             include substrate
             autoLayout tb 300 200
         }
 
-        container substrate "Modules" "Level 2 (module view): published Maven modules grouped by layer; edges are Maven compile dependencies matching ArchitectureTest." {
-            title "Unfurl Foundry Substrate â€” Modules"
+        container substrate "Modules" "Level 2 (module view): direct Maven compile dependencies grouped by layer; sample DCP needs are separately labelled. ArchitectureTest checks Java layering, not exact POM equality." {
+            title "Unfurl Foundry Substrate — Modules"
             include substrate.domain substrate.events substrate.ports substrate.prompt substrate.tools substrate.rag substrate.resolver substrate.serialization
             include substrate.offers substrate.engine substrate.springai substrate.testing substrate.sample_chatbot substrate.sample_research substrate.sample_tool
             include unfurl_substrate unfurl_dcp spring_ai jackson
@@ -376,7 +386,7 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
         }
 
         component substrate.ports "PortsComponents" "Level 3: port families in foundry-substrate-ports." {
-            title "foundry-substrate-ports â€” Port Families"
+            title "foundry-substrate-ports — Port Families"
             include substrate.ports.runtime_ports substrate.ports.node_adapters substrate.ports.ai substrate.ports.tools_ports substrate.ports.authorization
             include substrate.ports.cost substrate.ports.telemetry substrate.ports.validation substrate.ports.context substrate.ports.continuation
             include unfurl_substrate
@@ -384,28 +394,28 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
         }
 
         component substrate.engine "EngineComponents" "Level 3: embedded runtimes in foundry-substrate-engine and the ports they call." {
-            title "foundry-substrate-engine â€” Embedded Runtime"
+            title "foundry-substrate-engine — Embedded Runtime"
             include substrate.engine.agent_runtime substrate.engine.harness_runtime substrate.engine.delegate substrate.engine.durability substrate.engine.defaults
             include substrate.ports substrate.prompt substrate.tools substrate.rag substrate.resolver substrate.offers
             autoLayout tb 250 150
         }
 
         component substrate.offers "OffersComponents" "Level 3: DCP offers and contract invocables." {
-            title "foundry-substrate-offers â€” DCP Offers"
+            title "foundry-substrate-offers — DCP Offers"
             include substrate.offers.ai_offers substrate.offers.invocables substrate.offers.invocable_factory substrate.offers.projectors substrate.offers.projection_cli
             include substrate.ports unfurl_dcp developer
             autoLayout tb 250 150
         }
 
         component substrate.springai "SpringAiComponents" "Level 3: Spring AI adapters over host-supplied beans." {
-            title "foundry-substrate-springai-adapter â€” Adapters"
+            title "foundry-substrate-springai-adapter — Adapters"
             include substrate.springai.model_provider substrate.springai.embedding_provider substrate.springai.vector_store
             include substrate.ports host_ai model_vendors
             autoLayout tb 250 150
         }
 
-        component substrate.ports "Extensibility" "Open DCP integration ports as extension points with their customer-supplied implementations." {
-            title "Unfurl Foundry Substrate â€” Extensibility (open integration ports)"
+        component substrate.ports "Extensibility" "Neutral Java SPI extension points with host-supplied implementations; concern metadata is not a DCP claim-port declaration." {
+            title "Unfurl Foundry Substrate — Extensibility (open integration ports)"
             include substrate.ports.ai substrate.ports.tools_ports substrate.ports.authorization substrate.ports.cost substrate.ports.telemetry
             include substrate.ports.validation substrate.ports.context substrate.ports.continuation
             include substrate.engine
@@ -413,19 +423,32 @@ workspace "Unfurl Foundry Substrate" "Provider-neutral Java 21 agent library. Co
             autoLayout lr 250 120
         }
 
-        dynamic substrate.engine "EmbeddedAgentRun" "One embedded agent run, in the order EmbeddedAgentRuntime executes it." {
-            title "Embedded agent run â€” EmbeddedAgentRuntime.start"
-            developer -> substrate.engine.agent_runtime "start(agent, input, ExecutionContext): validate definition, resolve phase input"
+        // Sequence projection: one successful tool-using phase; repeat bounded model/tool turns as needed.
+        // Approval, guardrail and validation failures branch out; events are emitted at their actual boundaries.
+        dynamic substrate.engine "EmbeddedAgentRun" "Representative successful tool-using phase, with interleaved state and events. RAG/tools are conditional; bounded model/tool/correction cycles may repeat. REQUIRE_APPROVAL saves WAITING and emits TOOL_APPROVAL_REQUIRED instead of executing the tool." {
+            title "Embedded agent run — EmbeddedAgentRuntime.start"
+            developer -> substrate.engine.agent_runtime "start: validate definition and create run"
+            substrate.engine.agent_runtime -> substrate.engine.durability "Save initial RUNNING snapshot"
+            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit AGENT_STARTED"
+            substrate.engine.agent_runtime -> substrate.engine.durability "Resolve phase input; save phase RUNNING"
+            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit PHASE_STARTED"
             substrate.engine.agent_runtime -> substrate.ports.ai "Retrieve grounding when the phase declares a RAG query"
-            substrate.engine.agent_runtime -> substrate.ports.cost "CostGuardrail.check with lower-of budget context"
-            substrate.engine.agent_runtime -> substrate.ports.context "ModelRequestProjector.project on the assembled request"
+            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit RAG_RETRIEVED when retrieval runs"
+            substrate.engine.agent_runtime -> substrate.ports.cost "Check lower-of budget before model work; rejection emits GUARDRAIL_TRIPPED"
+            substrate.engine.agent_runtime -> substrate.ports.context "Assemble prompt; ModelRequestProjector.project"
             substrate.engine.agent_runtime -> substrate.engine.durability "ExternalCallBoundary.invoke(PROVIDER) wraps the model call"
             substrate.engine.agent_runtime -> substrate.ports.ai "ModelProvider returns content or tool calls"
-            substrate.engine.agent_runtime -> substrate.ports.authorization "ToolCallInterceptorChain.before, then PermissionBridge.check (REQUIRE_APPROVAL -> WAITING snapshot)"
+            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit MODEL_INVOKED and TOKENS_CONSUMED; update accounting"
+            substrate.engine.agent_runtime -> substrate.ports.authorization "Before-policy normalization, allow-list and PermissionBridge checks; approval branches to WAITING"
+            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit TOOL_CALLED for an admitted call"
             substrate.engine.agent_runtime -> substrate.engine.durability "ExternalCallBoundary.invoke(TOOL) wraps ToolExecutor"
-            substrate.engine.agent_runtime -> substrate.ports.validation "Output-schema and semantic validation drive bounded correction"
-            substrate.engine.agent_runtime -> substrate.engine.durability "AgentRunStore.save terminal or WAITING state"
-            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit AGENT_*/PHASE_*/MODEL_INVOKED/TOKENS_CONSUMED/TOOL_* events"
+            substrate.engine.agent_runtime -> substrate.ports.authorization "Run after-call interceptors on the tool result"
+            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit TOOL_COMPLETED on success; TOOL_FAILED on failure"
+            substrate.engine.agent_runtime -> substrate.ports.validation "Validate mapped output; bounded correction repeats model/tool boundaries if needed"
+            substrate.engine.agent_runtime -> substrate.engine.durability "Save completed phase snapshot"
+            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit PHASE_COMPLETED"
+            substrate.engine.agent_runtime -> substrate.engine.durability "Save terminal run after all reachable phases complete"
+            substrate.engine.agent_runtime -> substrate.ports.telemetry "Emit AGENT_COMPLETED"
             autoLayout lr 250 150
         }
 
