@@ -54,8 +54,8 @@ public final class SpringAiModelProvider implements ModelProvider {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<java.util.Map<String, Object>> ARGUMENTS_TYPE = new TypeReference<>() {
     };
-    private static final Set<String> SUPPORTED_PARAMETERS = Set.of(
-            "temperature", "topP", "topK", "maxTokens", "stopSequences");
+    // The shared neutral option vocabulary; anything else is not a provider option and fails closed.
+    private static final Set<String> SUPPORTED_PARAMETERS = ModelRequest.OPTION_PARAMETERS;
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(2);
     private static final ExecutorService CALL_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
     private final ChatModel chatModel;

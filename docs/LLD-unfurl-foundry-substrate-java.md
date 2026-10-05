@@ -296,8 +296,13 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 `ModelRequest` and `ModelResponse`
 
 - `ModelRequest` fields: `messages`, `modelRef`, `parameters` (temperature, maxTokens, …), `toolSchemas`, `metadata`.
-- The optional Spring AI adapter projects only the provider-neutral parameter allow-list
-  `temperature`, `topP`, `topK`, `maxTokens`, and `stopSequences`. Unknown parameters fail closed.
+- The provider-neutral parameter vocabulary is `ModelRequest.OPTION_PARAMETERS`: `temperature`, `topP`,
+  `topK`, `maxTokens` and `stopSequences`. The agent runtime builds a phase's request parameters with
+  `ModelRequest.optionParameters(phase.input())`. Only those option keys are sent as provider parameters.
+  Every other phase-input entry is data: it reaches the model through prompt templates or a host
+  projector's selected context, never as a provider option.
+- The optional Spring AI adapter accepts exactly `ModelRequest.OPTION_PARAMETERS`. Unknown parameters fail
+  closed.
   Neutral tool schemas are exposed as native Spring AI tool definitions with internal SDK tool
   execution disabled; tool calls therefore return to the substrate runtime for policy-governed
   execution. `metadata.timeoutMs` may shorten the adapter's finite default call timeout. Provider

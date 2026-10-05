@@ -1051,7 +1051,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime, AgentToolContin
             callMetadata.put("correctionProgress", correction.metadata());
         }
         ModelRequest request = modelRequestProjector.project(state.agent, phase, state.agentInput, resolvedInput,
-                new ModelRequest(requestMessages, modelRef, phase.input(), toolSchemas,
+                new ModelRequest(requestMessages, modelRef, ModelRequest.optionParameters(phase.input()), toolSchemas,
                         callMetadata), context);
         ModelResponse response = structuredToolCalls(externalCallBoundary.invoke(new ExternalCallBoundary.Call(
                 state.tenantId, state.runId, callId,

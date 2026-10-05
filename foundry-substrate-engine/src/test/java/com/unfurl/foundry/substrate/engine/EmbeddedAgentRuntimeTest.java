@@ -9,6 +9,7 @@ import com.unfurl.foundry.substrate.agent.CorrectionExhaustionAction;
 import com.unfurl.foundry.substrate.guardrail.CostGuardrailContext;
 import com.unfurl.foundry.substrate.failure.FailureCategory;
 import com.unfurl.foundry.substrate.failure.StructuredFailure;
+import com.unfurl.foundry.substrate.model.ModelRequest;
 import com.unfurl.foundry.substrate.model.Message;
 import com.unfurl.foundry.substrate.model.ModelResponse;
 import com.unfurl.foundry.substrate.model.ModelToolCall;
@@ -240,6 +241,34 @@ class EmbeddedAgentRuntimeTest {
 
         assertThat(run.errorCode()).isEqualTo("PREREQUISITE_MISSING");
         assertThat(executor.calls()).isEmpty();
+    }
+
+    /**
+     * Parameter contract: phase data (prompts, user messages, references) is never sent as provider parameters; only the declared
+     * neutral options are, so strict provider adapters do not reject ordinary agents.
+     */
+    @Test
+    void sendsOnlyNeutralOptionsAsProviderParameters() {
+        var requests = new java.util.ArrayList<ModelRequest>();
+        StaticProviderRegistry providers = new StaticProviderRegistry().registerModel("model", (request, context) -> {
+            requests.add(request);
+            return response("done", List.of());
+        });
+        EmbeddedAgentRuntime runtime = new EmbeddedAgentRuntime(providers, new DefaultToolRegistry());
+        var input = new java.util.LinkedHashMap<String, Object>();
+        input.put("prompt", "answer");
+        input.put("userMessage", "$.agent.input.userMessage");
+        input.put("temperature", 0.2);
+        input.put("maxTokens", 64);
+        AgentDefinition agent = new AgentDefinition("agent", "1", Map.of(), List.of(phase("only", input, List.of(), 0)), List.of(),
+                Map.of(), "model", List.of());
+
+        AgentRunState run = runtime.start(agent, Map.of("userMessage", "hello"), ExecutionContext.empty());
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.COMPLETED);
+        assertThat(requests).singleElement().satisfies(request ->
+                assertThat(request.parameters()).containsExactlyInAnyOrderEntriesOf(Map.of("temperature", 0.2, "maxTokens", 64)));
+        assertThat(ModelRequest.optionParameters(null)).isEmpty();
     }
 
     @Test
