@@ -6,6 +6,10 @@ import java.util.Objects;
 
 /**
  * Value Object: explicit inputs from which a ContextSelector may assemble model context.
+ *
+ * <p>{@code retrieved} carries host-retrieved records in rank order (best first). They are optional
+ * material: a selector may keep a rank-order prefix that fits its allocation, but must never reorder,
+ * alter, or invent records. The substrate performs no retrieval to populate this field.</p>
  */
 public record ContextSelectionRequest(
         Map<String, Object> input,
@@ -16,17 +20,29 @@ public record ContextSelectionRequest(
         Map<String, Object> provenance,
         List<String> resourceRefs,
         List<Map<String, Object>> unresolvedWaits,
+        List<Map<String, Object>> retrieved,
         ContextPolicy policy,
         Map<String, Object> metadata
 ) {
-    /** Canonical constructor: freezes all explicitly supplied context candidates. */
+    /** Canonical constructor: freezes all explicitly supplied context candidates, including each retrieved record. */
     public ContextSelectionRequest {
         input = copy(input); history = copy(history); pinnedFacts = copy(pinnedFacts);
         summaries = copy(summaries); toolResults = copy(toolResults); provenance = copy(provenance);
         resourceRefs = resourceRefs == null ? List.of() : List.copyOf(resourceRefs);
         unresolvedWaits = unresolvedWaits == null ? List.of() : List.copyOf(unresolvedWaits);
+        retrieved = retrieved == null ? List.of() : retrieved.stream()
+                .map(record -> Map.copyOf(Objects.requireNonNull(record, "retrieved record must not be null"))).toList();
         policy = Objects.requireNonNull(policy, "context policy is required");
         metadata = copy(metadata);
+    }
+
+    /** Compatibility constructor: the pre-retrieval request shape, with no retrieved records. */
+    public ContextSelectionRequest(Map<String, Object> input, Map<String, Object> history, Map<String, Object> pinnedFacts,
+                                   Map<String, Object> summaries, Map<String, Object> toolResults, Map<String, Object> provenance,
+                                   List<String> resourceRefs, List<Map<String, Object>> unresolvedWaits,
+                                   ContextPolicy policy, Map<String, Object> metadata) {
+        this(input, history, pinnedFacts, summaries, toolResults, provenance, resourceRefs, unresolvedWaits,
+                List.of(), policy, metadata);
     }
 
     /** Helper: converts nullable maps to immutable values without introducing implicit context. */

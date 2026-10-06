@@ -303,6 +303,17 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
   projector's selected context, never as a provider option.
 - The optional Spring AI adapter accepts exactly `ModelRequest.OPTION_PARAMETERS`. Unknown parameters fail
   closed.
+- Streaming is optional. `StreamingModelProvider extends ModelProvider` adds
+  `stream(request, context, Consumer<ModelDelta>)`:
+  - it delivers ordered `ModelDelta(index, text)` fragments of the assistant text;
+  - it returns the same authoritative `ModelResponse` that `complete` would;
+  - it disposes the underlying stream on thread interruption or timeout.
+
+  `EmbeddedAgentRuntime` streams only when the provider supports it and a `ModelStreamObserver` is
+  bound (an optional constructor argument; the default is none). Each delta is reported with its run,
+  phase and model-call identity. Observer failures are isolated, so streaming can never change a
+  run's result, journal or checkpoints. `SpringAiModelProvider` implements streaming over
+  `ChatModel.stream` and falls back to `complete` for models without streaming support.
   Neutral tool schemas are exposed as native Spring AI tool definitions with internal SDK tool
   execution disabled; tool calls therefore return to the substrate runtime for policy-governed
   execution. `metadata.timeoutMs` may shorten the adapter's finite default call timeout. Provider
@@ -339,7 +350,7 @@ The target terminal contract is `AgentTerminalEnvelope`, with `status`, `output`
 
 `ContextSelectionRequest`, `ContextSelectionResult`, and `ContextResource`
 
-- The request carries only explicitly supplied input, history, pinned facts, summaries, tool results, provenance, resource refs, and `ContextPolicy`.
+- The request carries only explicitly supplied input, history, pinned facts, summaries, tool results, provenance, resource refs, already-retrieved records (`retrieved`, rank-ordered), unresolved waits, and `ContextPolicy`. A compatibility constructor without `retrieved` supplies an empty list. Retrieved records are optional material: a selector may include a rank-order prefix that fits the allocation but must not reorder, alter, or invent records. The substrate performs no retrieval for this field; the host binds retrieval (Foundry: `LLD-vector-rag.md`).
 - The result carries the compacted context map, selected read-only resources, retained provenance, estimated token count, unresolved waits, and metadata.
 - Pinned facts, unresolved questions/approvals, governance metadata, definition digest, and retained provenance are mandatory compaction invariants. If mandatory material exceeds the token allocation, selection fails closed rather than dropping it.
 

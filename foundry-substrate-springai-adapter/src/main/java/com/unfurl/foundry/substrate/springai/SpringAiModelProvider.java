@@ -9,7 +9,9 @@ import com.unfurl.foundry.substrate.model.ModelResponse;
 import com.unfurl.foundry.substrate.model.ModelToolCall;
 import com.unfurl.foundry.substrate.model.ModelTurnOutcome;
 import com.unfurl.foundry.substrate.model.ModelUsage;
+import com.unfurl.foundry.substrate.model.ModelDelta;
 import com.unfurl.foundry.substrate.ports.ModelProvider;
+import com.unfurl.foundry.substrate.ports.StreamingModelProvider;
 import com.unfurl.substrate.policy.ExecutionContext;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -50,7 +52,7 @@ import java.util.concurrent.TimeoutException;
  * just routes calls through it. Foundry's substrate code stays oblivious
  * to which provider is wired.
  */
-public final class SpringAiModelProvider implements ModelProvider {
+public final class SpringAiModelProvider implements StreamingModelProvider {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<java.util.Map<String, Object>> ARGUMENTS_TYPE = new TypeReference<>() {
     };
@@ -254,15 +256,70 @@ public final class SpringAiModelProvider implements ModelProvider {
         Generation generation = response.getResult();
         AssistantMessage assistant = generation == null ? null : generation.getOutput();
         String content = assistant == null ? "" : Objects.requireNonNullElse(assistant.getText(), "");
-        Message message = Message.assistant(content);
-        String finishReason = generation == null || generation.getMetadata() == null
-                ? ""
-                : Objects.requireNonNullElse(generation.getMetadata().getFinishReason(), "");
-        List<ModelToolCall> toolCalls = toolCallsFrom(assistant);
-        ModelUsage usage = usageFrom(response);
-        return new ModelResponse(message, toolCalls, finishReason,
+        return toModelResponse(content, finishReasonOf(generation), toolCallsFrom(assistant), usageFrom(response));
+    }
+
+    /** Shared mapping: the one place a neutral response is built, for both the blocking and the streaming call. */
+    private ModelResponse toModelResponse(String content, String finishReason, List<ModelToolCall> toolCalls, ModelUsage usage) {
+        return new ModelResponse(Message.assistant(content), toolCalls, finishReason,
                 outcomeForFinishReason(finishReason, !toolCalls.isEmpty()), usage, java.util.Map.of(),
                 null, java.math.BigDecimal.ZERO);
+    }
+
+    /** Finish-reason accessor: empty when the generation carries none. */
+    private static String finishReasonOf(Generation generation) {
+        return generation == null || generation.getMetadata() == null
+                ? "" : Objects.requireNonNullElse(generation.getMetadata().getFinishReason(), "");
+    }
+
+    /**
+     * Streaming call: subscribes to {@code ChatModel.stream}, reports each chunk's text as an ordered delta, and aggregates the
+     * authoritative response from the chunks — concatenated text, every tool call, the last finish reason and the last reported
+     * usage — through the same mapping as {@link #complete}. The subscription is disposed on interruption or timeout, and failures
+     * are sanitized exactly as for {@code complete}. A model without streaming support falls back to {@code complete}.
+     */
+    @Override
+    public ModelResponse stream(ModelRequest request, ExecutionContext context, java.util.function.Consumer<ModelDelta> deltas) {
+        Objects.requireNonNull(request, "request is required");
+        Objects.requireNonNull(deltas, "delta consumer is required");
+        Prompt prompt = toPrompt(request);
+        Duration callTimeout = requestTimeout(request);
+        reactor.core.publisher.Flux<ChatResponse> flux;
+        try { flux = chatModel.stream(prompt); }
+        catch (UnsupportedOperationException notStreaming) { return complete(request, context); }
+        var text = new StringBuilder();
+        var toolCalls = new ArrayList<ModelToolCall>();
+        var finishReason = new java.util.concurrent.atomic.AtomicReference<String>("");
+        var usage = new java.util.concurrent.atomic.AtomicReference<ModelUsage>(ModelUsage.zero());
+        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var index = new java.util.concurrent.atomic.AtomicInteger();
+        var done = new java.util.concurrent.CountDownLatch(1);
+        reactor.core.Disposable subscription = flux.subscribe(chunk -> {
+            Generation generation = chunk.getResult();
+            AssistantMessage assistant = generation == null ? null : generation.getOutput();
+            String piece = assistant == null ? null : assistant.getText();
+            if (piece != null && !piece.isEmpty()) {
+                text.append(piece);
+                deltas.accept(new ModelDelta(index.getAndIncrement(), piece));
+            }
+            toolCalls.addAll(toolCallsFrom(assistant));
+            String reason = finishReasonOf(generation);
+            if (!reason.isEmpty()) finishReason.set(reason);
+            ModelUsage reported = usageFrom(chunk);
+            if (!reported.equals(ModelUsage.zero())) usage.set(reported);
+        }, error -> { failure.set(error); done.countDown(); }, done::countDown);
+        try {
+            if (!done.await(callTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                subscription.dispose();
+                throw new IllegalStateException("Spring AI provider call timed out");
+            }
+        } catch (InterruptedException ex) {
+            subscription.dispose();
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Spring AI provider call interrupted");
+        }
+        if (failure.get() != null) throw new IllegalStateException("Spring AI provider call failed");
+        return toModelResponse(text.toString(), finishReason.get(), List.copyOf(toolCalls), usage.get());
     }
 
     /**

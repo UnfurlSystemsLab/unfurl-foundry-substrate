@@ -77,6 +77,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class EmbeddedAgentRuntime implements AgentRuntime, AgentToolContinuation {
     private final com.unfurl.foundry.substrate.ports.CorrectionProgressObserver correctionObserver;
+    /** Optional streaming observer; null means no deltas are requested and every model call uses {@code complete}. */
+    private final com.unfurl.foundry.substrate.ports.ModelStreamObserver streamObserver;
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
@@ -206,7 +208,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime, AgentToolContin
                 com.unfurl.foundry.substrate.ports.CorrectionProgressObserver.noop());
     }
 
-    /** Ports and Adapters constructor: requires the host's correction observer before any repair can dispatch. */
+    /** Ports and Adapters constructor: requires the host's correction observer before any repair can dispatch; no streaming. */
     public EmbeddedAgentRuntime(
             ProviderRegistry providerRegistry, ToolRegistry toolRegistry, RagRetriever ragRetriever,
             CostGuardrail costGuardrail, PermissionBridge permissionBridge, AgentEventSink eventSink,
@@ -216,6 +218,28 @@ public final class EmbeddedAgentRuntime implements AgentRuntime, AgentToolContin
             ExternalCallBoundary externalCallBoundary, com.unfurl.foundry.substrate.ports.ModelRequestProjector modelRequestProjector,
             com.unfurl.foundry.substrate.ports.CorrectionProgressObserver correctionObserver
     ) {
+        this(providerRegistry, toolRegistry, ragRetriever, costGuardrail, permissionBridge, eventSink, promptAssembler, resolver,
+                validator, store, templates, toolCallInterceptors, outputSchemaValidator, semanticValidatorRegistry, externalCallBoundary,
+                modelRequestProjector, correctionObserver, null);
+    }
+
+    /**
+     * Ports and Adapters constructor with streaming: as above, plus an optional {@link
+     * com.unfurl.foundry.substrate.ports.ModelStreamObserver}. When it is bound and a phase's provider is a {@link
+     * com.unfurl.foundry.substrate.ports.StreamingModelProvider}, model text deltas are reported to it; the returned response
+     * stays authoritative and every journal, accounting and checkpoint path is unchanged.
+     */
+    public EmbeddedAgentRuntime(
+            ProviderRegistry providerRegistry, ToolRegistry toolRegistry, RagRetriever ragRetriever,
+            CostGuardrail costGuardrail, PermissionBridge permissionBridge, AgentEventSink eventSink,
+            PromptAssembler promptAssembler, DataReferenceResolver resolver, AgentDefinitionValidator validator,
+            AgentRunStore store, Map<String, PromptTemplate> templates, ToolCallInterceptorChain toolCallInterceptors,
+            OutputSchemaValidator outputSchemaValidator, SemanticValidatorRegistry semanticValidatorRegistry,
+            ExternalCallBoundary externalCallBoundary, com.unfurl.foundry.substrate.ports.ModelRequestProjector modelRequestProjector,
+            com.unfurl.foundry.substrate.ports.CorrectionProgressObserver correctionObserver,
+            com.unfurl.foundry.substrate.ports.ModelStreamObserver streamObserver
+    ) {
+        this.streamObserver = streamObserver;
         this.correctionObserver = Objects.requireNonNull(correctionObserver, "correction observer is required");
         this.providerRegistry = providerRegistry;
         this.toolRegistry = toolRegistry;
@@ -1035,6 +1059,22 @@ public final class EmbeddedAgentRuntime implements AgentRuntime, AgentToolContin
     }
 
 /**
+     * Provider dispatch Strategy: streams through a {@link com.unfurl.foundry.substrate.ports.StreamingModelProvider} only when an
+     * observer is bound, reporting each delta with its run/phase/call identity; otherwise calls {@code complete}. Either way the
+     * returned response is the authoritative result. Observer failures are swallowed here so a projection can never fail a run.
+     */
+    private ModelResponse invokeProvider(ModelProvider provider, ModelRequest request, ExecutionContext context, String runId,
+                                         String phaseId, String callId) {
+        if (streamObserver == null || !(provider instanceof com.unfurl.foundry.substrate.ports.StreamingModelProvider streaming)) {
+            return provider.complete(request, context);
+        }
+        return streaming.stream(request, context, delta -> {
+            try { streamObserver.delta(runId, phaseId, callId, delta, context); }
+            catch (RuntimeException ignored) { /* Streaming is a non-authoritative projection; the call continues regardless. */ }
+        });
+    }
+
+/**
      * Provider call Strategy: projects the normalized request before journaling or provider dispatch,
      * including tool/correction turns, and records cost only after a usable response returns.
  */
@@ -1056,7 +1096,7 @@ public final class EmbeddedAgentRuntime implements AgentRuntime, AgentToolContin
         ModelResponse response = structuredToolCalls(externalCallBoundary.invoke(new ExternalCallBoundary.Call(
                 state.tenantId, state.runId, callId,
                 ExternalCallBoundary.Kind.PROVIDER, modelRef, request),
-                () -> provider.complete(request, context)));
+                () -> invokeProvider(provider, request, context, state.runId, phase.id(), callId)));
         emit(context, state, phase.id(), AgentEventType.MODEL_INVOKED, Map.of("modelRef", String.valueOf(modelRef)));
         long prompt = response.usage().promptTokens();
         long completion = response.usage().completionTokens();
