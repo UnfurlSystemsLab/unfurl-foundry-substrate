@@ -12,7 +12,7 @@ The Substrate is a coordinated family of separately consumable JARs, not a featu
 
 1. `foundry-substrate-engine/pom.xml` directly depends on `foundry-substrate-rag` and `foundry-substrate-offers`.
 2. `foundry-substrate-offers/pom.xml` directly depends on `unfurl-dcp`, composition API, and Jackson YAML/JSR310. Thus consumers of the engine receive those dependencies transitively.
-3. `EmbeddedAgentRuntime.java` imports `com.unfurl.foundry.substrate.rag.Chunk`, `RagQuery`, and `RagResult`, and has an injected `RagRetriever`. Therefore removing the RAG JAR from the POM without moving/refactoring these types would break compilation.
+3. `EmbeddedAgentRuntime.java` imports `com.unfurl.foundry.substrate.rag.Chunk`, `RagQuery`, and `RagResult`, and has an injected `RagRetriever`. Those records already live in `foundry-substrate-domain`; their Java package does not identify the owning Maven artifact. `RagRetriever` lives in `foundry-substrate-ports`. Removing the engine's direct `foundry-substrate-rag` dependency in an isolated checkout passed production compilation (`mvn -B -o -pl foundry-substrate-engine -am -DskipTests compile`). This is compile evidence only, not full runtime/dependency-closure certification.
 4. The current HLD/LLD explicitly exclude parallel agent execution and work queues from Substrate. Any worker proposal requires a documented boundary decision before implementation.
 
 These are **dependency and design findings**, not evidence of measured startup/memory overhead. The direct dependency on offers must be checked against *all* engine source imports before removal.
@@ -30,7 +30,7 @@ These are **dependency and design findings**, not evidence of measured startup/m
 
 - Identify which RAG records are domain-level shared shapes versus module-level implementations. Avoid creating duplicate `RagQuery`/`RagResult` classes.
 - Keep the optional `RagRetriever` port usable without requiring a concrete RAG implementation.
-- Evaluate moving the pure RAG record shapes needed by the engine into `foundry-substrate-domain` or a narrow contract module, and relocating retrieval-specific glue to `foundry-substrate-rag`.
+- Preserve the pure RAG record shapes already in `foundry-substrate-domain` and the retriever port in `foundry-substrate-ports`; do not introduce an unnecessary record migration. Audit remaining implementation references and retrieval-specific glue before changing dependencies.
 - Only remove the engine-to-RAG dependency once all compile-time references are addressed and tests pass. Preserve behavior when no retriever is supplied.
 
 ### C. Execution and worker boundary — design only for now
