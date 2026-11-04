@@ -32,6 +32,9 @@ public interface ExternalCallBoundary {
         }
     }
 
-    /** Discriminator: identifies the neutral dispatch family for host-side governance. */
-    enum Kind { PROVIDER, TOOL, CHILD_AGENT, WORKFLOW }
+    /**
+     * Discriminator: identifies the neutral dispatch family for host-side governance. There is no workflow family: an
+     * agent never calls Flow; Flow calls agents.
+     */
+    enum Kind { PROVIDER, TOOL, CHILD_AGENT }
 }
