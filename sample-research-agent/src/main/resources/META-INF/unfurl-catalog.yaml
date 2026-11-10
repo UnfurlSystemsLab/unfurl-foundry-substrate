@@ -11,7 +11,7 @@ claim:
       - concern: agent.research
         description: Answer questions by retrieving relevant passages from a vector corpus and grounding the chat reply in them.
     boundary_principles:
-      - "Plug-and-play retrieval: pulls in foundry-substrate-rag through the rag.search@v1 need; tools and flow substrates are excluded by absence-of-need."
+      - "Plug-and-play retrieval: depends on rag.search@v1 next to agent.execute@v1. Fabric adds no component on its own, so a composition lists rag.search to select foundry-substrate-rag; tools and flow substrates are excluded because its needs do not request them."
       - "The corpus is host-owned, while RAG's vector-store and embedding-provider needs are satisfied by provider adapter claims or runtime profile bindings."
   refusals:
     - concern: rag.corpus-backend

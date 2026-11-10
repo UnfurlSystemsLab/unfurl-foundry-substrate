@@ -9,9 +9,9 @@ claim:
     summary: Model-agnostic agent orchestration runtime; the entry point for plug-and-play Foundry agents.
     concerns:
       - concern: agent.execute
-        description: Execute an agent's reasoning loop against a host-supplied ModelProvider port, optionally enriched with substrate plugins (RAG / tools / prompt templates) that the agent declares as needs.
+        description: Execute an agent's reasoning loop against a host-supplied ModelProvider port, optionally enriched with substrate plugins (RAG / tools / prompt templates) that the composition's needs select.
     boundary_principles:
-      - "Plug-and-play composition: the engine itself only needs a ModelProvider port; RAG and tools substrates are pulled in only when the agent's own needs request them."
+      - "Plug-and-play composition: the engine itself only needs a ModelProvider port; RAG and tools substrates are composed only when the composition's needs request them, and Fabric never adds one on its own."
       - "Model-agnostic by construction: the engine consumes foundry's neutral ModelProvider interface, so the LLM provider is selected by an adapter or profile binding rather than by engine code."
       - "Customer-controlled secrets: API keys and host configuration travel via provider adapters or runtime bindings, never via Fabric design-time state."
   refusals:
@@ -35,13 +35,13 @@ claim:
       - intent: bind-model-provider
         description: Confirm the host supplies a ModelProvider binding for agent execution.
       - intent: declare-substrate-plugins
-        description: Declare which RAG / tool / prompt substrates the agent's needs pull in.
+        description: Declare which RAG / tool / prompt substrates the composition's needs select.
     answer_grounding:
       - claim.offers
       - claim.dependencies
     limitations:
       - The engine requires a ModelProvider binding; it selects no LLM provider itself.
-      - Substrate plugins are composed from the agent's declared needs, not from runtime configuration.
+      - Substrate plugins are composed from the composition's declared needs, not from runtime configuration.
   faults:
     emitted:
       - code: agent.execute.failed

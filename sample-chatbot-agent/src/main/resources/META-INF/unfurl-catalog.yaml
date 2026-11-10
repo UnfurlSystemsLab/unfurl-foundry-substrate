@@ -11,7 +11,7 @@ claim:
       - concern: agent.chatbot
         description: Single-turn or multi-turn conversational agent; no retrieval, no tool use.
     boundary_principles:
-      - "Plug-and-play minimum: declares agent.execute as its only dependency; the resolver pulls in foundry-substrate-engine and nothing else."
+      - "Plug-and-play minimum: declares agent.execute as its only dependency. Fabric adds no component on its own, so a composition lists agent.execute and model-provider next to agent.chatbot to select foundry-substrate-engine and a provider adapter, and nothing else is selected."
       - "Provider-agnostic: the chat model is supplied through the engine's neutral model-provider need."
   refusals:
     - concern: ai.provider.selection
