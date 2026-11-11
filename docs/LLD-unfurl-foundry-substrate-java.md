@@ -622,7 +622,7 @@ public final class AgentInvocation implements ContractInvocable {
 
 `ToolInvocation` and `RagInvocation` follow the same shape. These are what the `unfurl-dcp` broker registers into a host `CapabilityRegistry` on accept; they translate a frozen-contract invocation into a call on the corresponding port (`AgentRuntime`, `ToolExecutor`, `RagRetriever`) and map the structured result back. The substrate provides the invocables and the shapes; it never decides whether the contract should exist.
 
-**Tool registrar shape [proposed].** The reverse direction — an in-process DCP component whose operations an agent host
+**Tool registrar shape [implemented].** The reverse direction — an in-process DCP component whose operations an agent host
 exposes as tools — uses DCP's in-process component host (DCP HLD-C §6.1). The host asks the component's activation for a
 registrar of this shape, so the component never depends on a host product and the host never imports component types.
 It lives in `com.unfurl.foundry.substrate.offers`, the one package here that imports `unfurl-dcp`:
