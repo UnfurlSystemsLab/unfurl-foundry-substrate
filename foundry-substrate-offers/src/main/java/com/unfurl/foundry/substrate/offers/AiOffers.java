@@ -40,6 +40,10 @@ public final class AiOffers {
     public static final String DETAIL_EXECUTION_MODES = "execution_modes";
     public static final String DETAIL_DEFAULT_EXECUTION_MODE = "default_execution_mode";
     public static final String DETAIL_MODE_POLICIES = "mode_policies";
+    /** Offer detail publishing how an {@code agent.run} caller names the agent (LLD, <em>Offers And Composition</em>). */
+    public static final String DETAIL_AGENT_SELECTION = "agent_selection";
+    /** The {@code agent.run} input field naming the agent to run, as an exact {@code <id>@<version>}. */
+    public static final String AGENT_REF = "agentRef";
 
 /**
  * Constructs AiOffers with the dependencies or value fields required by this component and preserves constructor validation invariants.
@@ -89,6 +93,7 @@ public final class AiOffers {
         details.put(DETAIL_EXECUTION_MODES, modes);
         details.put(DETAIL_DEFAULT_EXECUTION_MODE, defaultMode);
         details.put(DETAIL_MODE_POLICIES, modePolicies == null ? Map.of() : Map.copyOf(modePolicies));
+        details.put(DETAIL_AGENT_SELECTION, agentSelection());
         return new Offer(
                 AGENT_RUN,
                 "Run an agent",
@@ -98,6 +103,18 @@ public final class AiOffers {
                 version,
                 true,
                 "metered=true; unit=tokens");
+    }
+
+/**
+ * Detail Factory: how an {@code agent.run} caller names the agent. The capability publishes the field; the provider's own
+ * catalog and governance decide which agents exist and who may run them, so no agent is ever named in the offer.
+ */
+    public static Map<String, Object> agentSelection() {
+        Map<String, Object> selection = new LinkedHashMap<>();
+        selection.put("field", AGENT_REF);
+        selection.put("format", "<id>@<version>");
+        selection.put("when_absent", "default_agent");
+        return Map.copyOf(selection);
     }
 
 /**

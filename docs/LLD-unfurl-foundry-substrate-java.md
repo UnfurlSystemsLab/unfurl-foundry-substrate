@@ -606,6 +606,12 @@ approval authority is introduced into the substrate by this helper.
 Offer fragments and AI invocables live in `com.unfurl.foundry.substrate.offers` and constitute the only place `unfurl-dcp` is imported.
 
 - **Offer fragments** are DCP claim shapes (from `unfurl-dcp`) describing each AI capability a component exposes: operation name (`agent.run`, `tool.call`, `rag.search`, `provider.call`), input/output shape references, and cost-implication metadata. A component publishes these as part of its claim; fabric negotiates them; the broker registers the accepted ones.
+- **Agent selection** is part of the `agent.run` request shape. The offer's `agent_selection` detail publishes it:
+  the caller names the agent in the input field `agentRef` (`field`), as an exact `<id>@<version>` (`format`); without
+  it the provider runs its configured default (`when_absent: default_agent`). `agent.run` is a capability: the offer and
+  any contract made from it grant the capability and never name, list or limit agents. Which agents exist, and who may
+  run them, is the provider's configuration and governance (Foundry LLD-management-api-and-operations, *`agent.run`:
+  served contracts and agent selection*). `AiOffers.AGENT_REF` is the field name every consumer and provider shares.
 - **Fault fragments** are the matching DCP `FaultPolicy` declarations for those offers. `foundry-substrate-offers` supplies canonical fault policies for `agent.run`, `skill.invoke`, `tool.call`, `rag.search`, and `provider.call`; passive catalog entries must still publish `faults.emitted: []`.
 - **Provider adapter claims** expose the neutral ports they implement. For example, a Spring AI adapter offers `model-provider`, `embedding-provider`, and `vector-store`; `spring-ai.*` bean names remain host-owned runtime leaf dependencies or metadata, never the capabilities consumed by Foundry, RAG, or Flowfoundry closure.
 - **AI invocables** implement the substrate `ContractInvocable`:
