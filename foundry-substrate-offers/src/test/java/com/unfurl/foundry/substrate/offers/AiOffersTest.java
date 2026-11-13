@@ -32,6 +32,19 @@ class AiOffersTest {
                 .containsKey(AiOffers.DETAIL_MODE_POLICIES);
     }
 
+    /**
+     * The agent.run offer publishes how a caller names the agent (the agentRef input field) and that the provider's
+     * default runs without it; it never names an agent itself.
+     */
+    @Test
+    void agentRunOfferPublishesAgentSelectionWithoutNamingAgents() {
+        var offer = AiOffers.agentRunOffer("1.0.0");
+
+        assertThat(offer.offerInterface().details()).containsEntry(AiOffers.DETAIL_AGENT_SELECTION,
+                java.util.Map.of("field", AiOffers.AGENT_REF, "format", "<id>@<version>", "when_absent", "default_agent"));
+        assertThat(AiOffers.AGENT_REF).isEqualTo("agentRef");
+    }
+
     @Test
     void exposesCanonicalFaultsForSelectedOffers() {
         var faults = AiOffers.faultPolicyFor(AiOffers.standardAiOffers("1.0.0"));
